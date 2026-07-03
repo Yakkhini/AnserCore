@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
+# SPDX-License-Identifier: MulanPSL-2.0
+#
 # Configuration file for the Sphinx documentation builder.
 #
 # For the full list of built-in configuration values, see the documentation:

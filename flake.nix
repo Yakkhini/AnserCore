@@ -1,11 +1,14 @@
+# SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
+# SPDX-License-Identifier: MulanPSL-2.0
 {
-  description = "Description for the project";
+  description = "Flake for Anser Core project";
 
   inputs = {
     flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     devshell.url = "github:numtide/devshell";
+    git-hooks-nix.url = "github:cachix/git-hooks.nix";
     treefmt-nix.url = "github:numtide/treefmt-nix";
   };
 
@@ -18,6 +21,7 @@
         #   2. Add foo as a parameter to the outputs function
         #   3. Add here: foo.flakeModule
         inputs.devshell.flakeModule
+        inputs.git-hooks-nix.flakeModule
         inputs.treefmt-nix.flakeModule
       ];
       systems = ["x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin"];
@@ -38,9 +42,25 @@
         devshells.default = {
           name = "ansercore-devshell";
 
+          devshell.startup.pre-commit.text = config.pre-commit.installationScript;
+
           packages = [
-            (pkgs.python3.withPackages (ps: with ps; [ sphinx ]))
+            pkgs.reuse
+
+            (pkgs.python3.withPackages (ps: with ps; [sphinx]))
           ];
+        };
+        pre-commit = {
+          settings = {
+            package = pkgs.prek;
+            hooks = {
+              reuse = {
+                enable = true;
+                excludes = ["flake.lock"];
+              };
+              treefmt.enable = true;
+            };
+          };
         };
         treefmt = {
           programs.alejandra.enable = true;
