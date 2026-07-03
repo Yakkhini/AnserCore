@@ -1,2 +1,4 @@
 .envrc
 .direnv
+
+docs/_build

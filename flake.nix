@@ -37,6 +37,10 @@
         packages.default = pkgs.hello;
         devshells.default = {
           name = "ansercore-devshell";
+
+          packages = [
+            (pkgs.python3.withPackages (ps: with ps; [ sphinx ]))
+          ];
         };
         treefmt = {
           programs.alejandra.enable = true;
