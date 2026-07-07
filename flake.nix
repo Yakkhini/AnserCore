@@ -50,6 +50,15 @@
 
             (pkgs.python3.withPackages (ps: with ps; [sphinx myst-parser furo]))
           ];
+
+          commands = [
+            {
+              name = "docs-build";
+              help = "build docs";
+              command = "sphinx-build --nitpicky --fail-on-warning docs docs/_build/html";
+              category = "docs";
+            }
+          ];
         };
 
         pre-commit = {
