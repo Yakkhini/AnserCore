@@ -47,7 +47,7 @@
           packages = [
             pkgs.reuse
 
-            (pkgs.python3.withPackages (ps: with ps; [sphinx]))
+            (pkgs.python3.withPackages (ps: with ps; [sphinx furo]))
           ];
         };
         pre-commit = {
