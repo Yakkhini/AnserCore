@@ -56,6 +56,12 @@
           settings = {
             package = pkgs.prek;
             hooks = {
+              # pre-commit built-in hooks
+              check-yaml.enable = true;
+              end-of-file-fixer.enable = true;
+              mixed-line-endings.enable = true;
+              trim-trailing-whitespace.enable = true;
+
               reuse = {
                 enable = true;
                 excludes = ["flake.lock"];
