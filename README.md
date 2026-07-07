@@ -2,6 +2,7 @@
 SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
 SPDX-License-Identifier: MulanPSL-2.0
 -->
+
 # AnserCore
 
 ## LICENSE
@@ -19,4 +20,3 @@ EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 ```
-

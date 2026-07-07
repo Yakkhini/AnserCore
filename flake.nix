@@ -39,6 +39,7 @@
 
         # Equivalent to  inputs'.nixpkgs.legacyPackages.hello;
         packages.default = pkgs.hello;
+
         devshells.default = {
           name = "ansercore-devshell";
 
@@ -50,6 +51,7 @@
             (pkgs.python3.withPackages (ps: with ps; [sphinx myst-parser furo]))
           ];
         };
+
         pre-commit = {
           settings = {
             package = pkgs.prek;
@@ -62,10 +64,22 @@
             };
           };
         };
+
         treefmt = {
           programs.alejandra.enable = true;
+          programs.autocorrect.enable = true;
+          programs.mdformat.enable = true;
+
+          settings.formatter.sphinx-lint = {
+            command = "${pkgs.sphinx-lint}/bin/sphinx-lint";
+            options = ["--enable=default-role"];
+            includes = ["*.rst"];
+          };
+
+          settings.excludes = ["LICENSES/*" "LICENSE"];
         };
       };
+
       flake = {
         # The usual flake attributes can be defined here, including system-
         # agnostic ones like nixosModule and system-enumerating ones, although
