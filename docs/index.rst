@@ -6,13 +6,14 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Anser Core documentation
+Anser Core Documentation
 ========================
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
+Anser Core is a RISC-V architecture processor core designed by ECOS Team.
 
+All source code in this repository is licensed under Mulan PSL v2.
+
+All documentation content is licensed under `CC BY-SA 4.0 <https://creativecommons.org/licenses/by-sa/4.0/>`_.
 
 .. toctree::
    :maxdepth: 2
