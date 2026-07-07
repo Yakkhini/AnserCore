@@ -6,10 +6,10 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Anser Core Documentation
+AnserCore Documentation
 ========================
 
-Anser Core is a RISC-V architecture processor core designed by ECOS Team.
+AnserCore is a RISC-V architecture processor core designed by ECOS Team.
 
 All source code in this repository is licensed under Mulan PSL v2.
 

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
 # SPDX-License-Identifier: MulanPSL-2.0
 {
-  description = "Flake for Anser Core project";
+  description = "Flake for AnserCore project";
 
   inputs = {
     flake-parts.url = "github:hercules-ci/flake-parts";
