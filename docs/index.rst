@@ -1,5 +1,5 @@
 .. SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
-   SPDX-License-Identifier: MulanPSL-2.0
+   SPDX-License-Identifier: CC-BY-SA-4.0
 
 .. Anser Core documentation master file, created by
    sphinx-quickstart on Fri Jul  3 13:55:16 2026.
@@ -18,4 +18,3 @@ All documentation content is licensed under `CC BY-SA 4.0 <https://creativecommo
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
-
