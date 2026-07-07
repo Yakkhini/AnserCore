@@ -68,6 +68,7 @@
               # pre-commit built-in hooks
               check-yaml.enable = true;
               end-of-file-fixer.enable = true;
+              gitlint.enable = true;
               mixed-line-endings.enable = true;
               trim-trailing-whitespace.enable = true;
 
