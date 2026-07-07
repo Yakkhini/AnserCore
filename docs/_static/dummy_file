@@ -1,0 +1,4 @@
+SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
+SPDX-License-Identifier: CC-BY-SA-4.0
+
+Just a dummy file to make git track this directory to avoid sphinx build warning.
