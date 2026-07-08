@@ -196,7 +196,10 @@
 <li class="toctree-l1"><a class="reference internal" href="01-frontend/index.html">前端</a></li>
 <li class="toctree-l1"><a class="reference internal" href="02-backend/index.html">后端</a></li>
 <li class="toctree-l1"><a class="reference internal" href="03-memory-system/index.html">仿存</a></li>
-<li class="toctree-l1"><a class="reference internal" href="04-cache-subsystem/index.html">缓存子系统</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="04-cache-subsystem/index.html">缓存子系统</a><input aria-label="Toggle navigation of 缓存子系统" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="04-cache-subsystem/mshrctrl.html">MSHR 控制模块</a></li>
+</ul>
+</li>
 </ul>
 
 </div>
@@ -254,7 +257,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 <p>一般性的，从模块拆分的角度看，可以在四个主要组件下编写各个下一级子模块的文档。不建议将模块拆分得太碎。</p>
 <p>文档格式主要由 MyST 标记语言进行编写。对于任何模块的文档编写，建议包括以下内容：</p>
 <dl class="simple myst">
-<dt>功能描述</dt><dd><p>从模块动机和微架构特性的角度，用语言文字描述此模块的功能与性能方案，方便读者理解此模块的工作方式与性能特征。</p>
+<dt>功能描述</dt><dd><p>从模块动机和微架构特性的角度，用语言文字描述此模块的功能与性能方案，方便读者理解此模块的工作方式与性能特征。如果存在下一级子模块，则需要在这一部分进行列举和简单描述。</p>
 </dd>
 <dt>参数描述</dt><dd><p>如果此模块支持参数化配置，需要描述此模块的参数类型、含义、默认值、合法值等。考虑使用 MyST 的 <code class="docutils literal notranslate"><span class="pre">fieldlist</span></code> 或 <code class="docutils literal notranslate"><span class="pre">deflist</span></code> 来编写参数列表。</p>
 </dd>
@@ -264,7 +267,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 </dd>
 <dt>流水级描述</dt><dd><p>对于流水化模块，需要描述各个流水级在时钟周期内的行为。</p>
 </dd>
-<dt>状态机描述</dt><dd><p>描述此模块的状态机设计，以及每个状态在做的业务逻辑。</p>
+<dt>状态机描述</dt><dd><p>描述此模块的状态机设计，以及每个状态处理的业务逻辑。</p>
 </dd>
 </dl>
 <p>上述的第一个、第二个部分为通用性质的描述。第三个、第四个部分为模块对外形态的描述，用于其他模块的维护者理解此模块的行为，以支持相关模块的开发工作。第五个、第六个部分为模块内部形态的描述，用于此模块维护者后续的实现、迭代等开发工作。对于可参数化模块，在一般情况下各个内容部分基于默认值的假设编写，如果存在某些参数下功能的边界行为或者特例，有必要时也可以补充。</p>

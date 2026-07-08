@@ -3,7 +3,7 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="索引" href="../../genindex.html"><link rel="search" title="搜索" href="../../search.html"><link rel="prev" title="仿存" href="../03-memory-system/index.html">
+<link rel="index" title="索引" href="../../genindex.html"><link rel="search" title="搜索" href="../../search.html"><link rel="next" title="MSHR 控制模块" href="mshrctrl.html"><link rel="prev" title="仿存" href="../03-memory-system/index.html">
 
     <!-- Generated with Sphinx 9.1.0 and Furo 2025.12.19 -->
         <title>缓存子系统 - AnserCore 文档</title>
@@ -172,7 +172,7 @@
           <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
         </button>
       </div>
-      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
         <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
       </label>
     </div>
@@ -196,7 +196,10 @@
 <li class="toctree-l1"><a class="reference internal" href="../01-frontend/index.html">前端</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../02-backend/index.html">后端</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../03-memory-system/index.html">仿存</a></li>
-<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">缓存子系统</a></li>
+<li class="toctree-l1 current has-children current-page"><a class="current reference internal" href="#">缓存子系统</a><input aria-label="Toggle navigation of 缓存子系统" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="mshrctrl.html">MSHR 控制模块</a></li>
+</ul>
+</li>
 </ul>
 
 </div>
@@ -230,7 +233,7 @@
               <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
             </button>
           </div>
-          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
             <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
           </label>
         </div>
@@ -242,6 +245,66 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 <section id="id1">
 <h1>缓存子系统<a class="headerlink" href="#id1" title="链接到此标题。">¶</a></h1>
 <p>AnserCore 缓存子系统微架构文档</p>
+<section id="id2">
+<h2>功能描述<a class="headerlink" href="#id2" title="链接到此标题。">¶</a></h2>
+<p>缓存子系统（Cache Subsystem）负责 L2 缓存。YQH-L2 模块通过通道控制器接收 TileLink 总线上的请求，并将其转换为 Cache 内部请求。之后通过请求仲裁模块进入主流水线，读取目录获取缓存块状态，根据缓存块状态和请求信息判断是否能够处理。若本层缓存可以直接处理该请求，则继续在主流水线中进行读数据、更新目录等操作，然后进入通道控制器模块，转化为 TileLink 总线请求回复。</p>
+<p>若需要和其它缓存进行交互才能处理该请求，则为其配一个 MSHR。MSHR 根据需求向上下层 Cache 发送子请求，等待收到响应并满足释放条件后，再释放任务重新进入主流水线，进行读缓冲区、读写数据、更新目录等操作，然后进入通道控制器模块，转化为 TileLink 总线请求回复。</p>
+<p>当一个请求所需的全部操作在 MSHR 中完成时，MSHR 被释放，等待接收新的请求。</p>
+<section id="id3">
+<h3>子模块列表<a class="headerlink" href="#id3" title="链接到此标题。">¶</a></h3>
+<dl class="simple myst">
+<dt><a class="reference internal" href="mshrctrl.html"><span class="doc">mshrctrl</span></a></dt><dd><p>MSHR（Miss Status Handling Register）控制模块，管理所有 miss / probe / refill / release 等跨周期事务，默认包含 16 项 MSHR。</p>
+</dd>
+</dl>
+</section>
+<section id="mesi">
+<h3>特性 1：采用类 MESI 的缓存一致性协议<a class="headerlink" href="#mesi" title="链接到此标题。">¶</a></h3>
+<p>YQH-L2 遵循 TileLink 一致性树的规则，其缓存行状态包括 N（Nothing）、B（Branch）、T（Trunk）、TT（Tip）4 个状态：</p>
+<ul class="simple">
+<li><p>N：无效</p></li>
+<li><p>B：只有读权限</p></li>
+<li><p>T：当前核具有写权限，但是写权限位于上游 cache，当前 cache 层次不可读不可写（内部状态）</p></li>
+<li><p>TT：可读可写</p></li>
+</ul>
+<p>一致性树按照内存、L3、L2、L1 的顺序自下而上生长，内存作为根节点拥有可读可写的权限，子节点的权限都不能超过父节点的权限。其中 TT 代表拥有 T 权限的最上层子节点（也是 T 权限树的叶子节点），说明该节点上层只有 N 或 B 权限，相反 T 权限而不是 TT 权限的节点代表上层一定还有 T/TT 权限节点。详细规则请参考 TileLink 手册 9.1 章。</p>
+</section>
+</section>
+<section id="id4">
+<h2>参数描述<a class="headerlink" href="#id4" title="链接到此标题。">¶</a></h2>
+<dl class="simple myst">
+<dt><code class="docutils literal notranslate"><span class="pre">enabldMSHR</span></code></dt><dd><p>是否启用 MSHR，默认为 true。</p>
+</dd>
+</dl>
+</section>
+<section id="id5">
+<h2>接口描述<a class="headerlink" href="#id5" title="链接到此标题。">¶</a></h2>
+</section>
+<section id="id6">
+<h2>事务描述<a class="headerlink" href="#id6" title="链接到此标题。">¶</a></h2>
+<section id="id7">
+<h3>接收并响应请求事务<a class="headerlink" href="#id7" title="链接到此标题。">¶</a></h3>
+</section>
+<section id="refill">
+<h3>发送 Refill 事务<a class="headerlink" href="#refill" title="链接到此标题。">¶</a></h3>
+</section>
+</section>
+<section id="id8">
+<h2>流水级描述<a class="headerlink" href="#id8" title="链接到此标题。">¶</a></h2>
+<ul class="simple">
+<li><p>Stage 1：接收 L1 请求</p></li>
+<li><p>Stage 2：发回相应信号</p></li>
+</ul>
+</section>
+<section id="id9">
+<h2>状态机描述<a class="headerlink" href="#id9" title="链接到此标题。">¶</a></h2>
+<ul class="simple">
+<li><p>sIdle：</p></li>
+<li><p>sWork：</p></li>
+<li><p>sRefill：</p></li>
+</ul>
+<div class="toctree-wrapper compound">
+</div>
+</section>
 </section>
 
         </article>
@@ -249,7 +312,15 @@ SPDX-License-Identifier: CC-BY-SA-4.0
       <footer>
         
         <div class="related-pages">
-          
+          <a class="next-page" href="mshrctrl.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">MSHR 控制模块</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
           <a class="prev-page" href="../03-memory-system/index.html">
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
@@ -279,8 +350,40 @@ SPDX-License-Identifier: CC-BY-SA-4.0
         
       </footer>
     </div>
-    <aside class="toc-drawer no-toc">
+    <aside class="toc-drawer">
       
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">缓存子系统</a><ul>
+<li><a class="reference internal" href="#id2">功能描述</a><ul>
+<li><a class="reference internal" href="#id3">子模块列表</a></li>
+<li><a class="reference internal" href="#mesi">特性 1：采用类 MESI 的缓存一致性协议</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id4">参数描述</a></li>
+<li><a class="reference internal" href="#id5">接口描述</a></li>
+<li><a class="reference internal" href="#id6">事务描述</a><ul>
+<li><a class="reference internal" href="#id7">接收并响应请求事务</a></li>
+<li><a class="reference internal" href="#refill">发送 Refill 事务</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id8">流水级描述</a></li>
+<li><a class="reference internal" href="#id9">状态机描述</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
       
       
     </aside>

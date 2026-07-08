@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="索引" href="../../genindex.html"><link rel="search" title="搜索" href="../../search.html"><link rel="next" title="仿存" href="../03-memory-system/index.html"><link rel="prev" title="前端" href="../01-frontend/index.html">
+<link rel="index" title="索引" href="../../genindex.html"><link rel="search" title="搜索" href="../../search.html"><link rel="prev" title="缓存子系统" href="index.html">
 
     <!-- Generated with Sphinx 9.1.0 and Furo 2025.12.19 -->
-        <title>后端 - AnserCore 文档</title>
+        <title>MSHR 控制模块 - AnserCore 文档</title>
       <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -172,7 +172,7 @@
           <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
         </button>
       </div>
-      <label class="toc-overlay-icon toc-header-icon no-toc" for="__toc">
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
         <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
       </label>
     </div>
@@ -194,10 +194,10 @@
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="../index.html">微架构概述</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../01-frontend/index.html">前端</a></li>
-<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">后端</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../02-backend/index.html">后端</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../03-memory-system/index.html">仿存</a></li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../04-cache-subsystem/index.html">缓存子系统</a><input aria-label="Toggle navigation of 缓存子系统" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="../04-cache-subsystem/mshrctrl.html">MSHR 控制模块</a></li>
+<li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">缓存子系统</a><input aria-label="Toggle navigation of 缓存子系统" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">MSHR 控制模块</a></li>
 </ul>
 </li>
 </ul>
@@ -220,7 +220,7 @@
         </a>
         <div class="content-icon-container">
           <div class="view-this-page">
-  <a class="muted-link" href="../../_sources/microarchitecture/02-backend/index.md.txt" title="View this page">
+  <a class="muted-link" href="../../_sources/microarchitecture/04-cache-subsystem/mshrctrl.md.txt" title="View this page">
     <svg><use href="#svg-eye"></use></svg>
     <span class="visually-hidden">View this page</span>
   </a>
@@ -233,18 +233,36 @@
               <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
             </button>
           </div>
-          <label class="toc-overlay-icon toc-content-icon no-toc" for="__toc">
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
             <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
           </label>
         </div>
         <article role="main" id="furo-main-content">
-          <!--
-SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
-SPDX-License-Identifier: CC-BY-SA-4.0
--->
+          <section id="mshr">
+<h1>MSHR 控制模块<a class="headerlink" href="#mshr" title="链接到此标题。">¶</a></h1>
 <section id="id1">
-<h1>后端<a class="headerlink" href="#id1" title="链接到此标题。">¶</a></h1>
-<p>AnserCore 后端微架构文档</p>
+<h2>功能描述<a class="headerlink" href="#id1" title="链接到此标题。">¶</a></h2>
+<p>当 L2 发生缓存 miss 或者 hit 但需要更改 meta 权限时，会为请求分配一项 MSHR，用于记录请求所处的状态，并接收通道控制器与目录的响应，根据当前状态发出对应的控制请求。当所有控制请求完成后，释放 MSHR。</p>
+</section>
+<section id="id2">
+<h2>接口描述<a class="headerlink" href="#id2" title="链接到此标题。">¶</a></h2>
+</section>
+<section id="id3">
+<h2>事务描述<a class="headerlink" href="#id3" title="链接到此标题。">¶</a></h2>
+</section>
+<section id="id4">
+<h2>流水级描述<a class="headerlink" href="#id4" title="链接到此标题。">¶</a></h2>
+<ul class="simple">
+<li><p>Stage 1: xxxx</p></li>
+<li><p>Stage 2: xxxx</p></li>
+</ul>
+</section>
+<section id="id5">
+<h2>状态机描述<a class="headerlink" href="#id5" title="链接到此标题。">¶</a></h2>
+<ul class="simple">
+<li><p>sWork</p></li>
+</ul>
+</section>
 </section>
 
         </article>
@@ -252,23 +270,15 @@ SPDX-License-Identifier: CC-BY-SA-4.0
       <footer>
         
         <div class="related-pages">
-          <a class="next-page" href="../03-memory-system/index.html">
-              <div class="page-info">
-                <div class="context">
-                  <span>Next</span>
-                </div>
-                <div class="title">仿存</div>
-              </div>
-              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
-            </a>
-          <a class="prev-page" href="../01-frontend/index.html">
+          
+          <a class="prev-page" href="index.html">
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
                 <div class="context">
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">前端</div>
+                <div class="title">缓存子系统</div>
                 
               </div>
             </a>
@@ -290,8 +300,31 @@ SPDX-License-Identifier: CC-BY-SA-4.0
         
       </footer>
     </div>
-    <aside class="toc-drawer no-toc">
+    <aside class="toc-drawer">
       
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">MSHR 控制模块</a><ul>
+<li><a class="reference internal" href="#id1">功能描述</a></li>
+<li><a class="reference internal" href="#id2">接口描述</a></li>
+<li><a class="reference internal" href="#id3">事务描述</a></li>
+<li><a class="reference internal" href="#id4">流水级描述</a></li>
+<li><a class="reference internal" href="#id5">状态机描述</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
       
       
     </aside>
