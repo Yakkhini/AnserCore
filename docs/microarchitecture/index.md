@@ -7,8 +7,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 当前 AnserCore 的微架构可以分为四个主要组件：
 
-- **前端（Frontend）**: 前端负责指令获取、指令解码和指令执行。
-- **后端（Backend）**: 后端负责数据获取、数据缓存和数据写入。
+- **前端（Frontend）**: 前端负责分支预测、指令取回、指令解码等功能处理。
+- **后端（Backend）**: 后端负责乱序调度、指令执行、数据写回等功能处理。
 - **仿存（Memory System）**: 仿存负责管理内存层级，包括 LSU、MMU 和 DCache。
 - **缓存子系统（Cache Subsystem）**: 缓存子系统负责管理缓存层级，包括 L2 缓存。
 
