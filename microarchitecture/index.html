@@ -248,8 +248,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 <ul class="simple">
 <li><p><strong>前端（Frontend）</strong>: 前端负责分支预测、指令取回、指令解码等功能处理。</p></li>
 <li><p><strong>后端（Backend）</strong>: 后端负责乱序调度、指令执行、数据写回等功能处理。</p></li>
-<li><p><strong>仿存（Memory System）</strong>: 仿存负责管理内存层级，包括 LSU、MMU 和 DCache。</p></li>
-<li><p><strong>缓存子系统（Cache Subsystem）</strong>: 缓存子系统负责管理缓存层级，包括 L2 缓存。</p></li>
+<li><p><strong>仿存（Memory System）</strong>: 仿存负责管理内存层级，包括 LSU、MMU 和 L1 DCache。</p></li>
+<li><p><strong>缓存子系统（Cache Subsystem）</strong>: 缓存子系统负责 L2 缓存的设计和实现。</p></li>
 </ul>
 <section id="id2">
 <h2>文档规范<a class="headerlink" href="#id2" title="链接到此标题。">¶</a></h2>
@@ -276,7 +276,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 [docs, frontend] add ICache documentation
 [docs, backend] fix typos in issue queue description
 [docs, memory] merge load queue and store queue doc files
-[docs, cache] remove music files since unuseful
+[docs, l2cache] remove music files since unuseful
 </pre></div>
 </div>
 <p>从排版规范来看，以 <a class="reference external" href="https://github.com/sparanoid/chinese-copywriting-guidelines">中文文案排版指北</a> 为准。目前一些格式检查的 CI / PR 检查工具已经部署到仓库内，如果贡献内容存在格式问题预期会暴露出来。</p>

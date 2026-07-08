@@ -9,8 +9,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - **前端（Frontend）**: 前端负责分支预测、指令取回、指令解码等功能处理。
 - **后端（Backend）**: 后端负责乱序调度、指令执行、数据写回等功能处理。
-- **仿存（Memory System）**: 仿存负责管理内存层级，包括 LSU、MMU 和 DCache。
-- **缓存子系统（Cache Subsystem）**: 缓存子系统负责管理缓存层级，包括 L2 缓存。
+- **仿存（Memory System）**: 仿存负责管理内存层级，包括 LSU、MMU 和 L1 DCache。
+- **缓存子系统（Cache Subsystem）**: 缓存子系统负责 L2 缓存的设计和实现。
 
 ## 文档规范
 
@@ -47,7 +47,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 [docs, frontend] add ICache documentation
 [docs, backend] fix typos in issue queue description
 [docs, memory] merge load queue and store queue doc files
-[docs, cache] remove music files since unuseful
+[docs, l2cache] remove music files since unuseful
 ```
 
 从排版规范来看，以 [中文文案排版指北](https://github.com/sparanoid/chinese-copywriting-guidelines) 为准。目前一些格式检查的 CI / PR 检查工具已经部署到仓库内，如果贡献内容存在格式问题预期会暴露出来。
