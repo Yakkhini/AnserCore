@@ -9,11 +9,18 @@
 AnserCore Documentation
 ========================
 
-AnserCore is a RISC-V architecture processor core designed by ECOS Team.
+AnserCore is a RISC-V architecture processor core designed by ECOS Team, with Out-of-Order pipeline and RVB23 profiles support.
 
 All source code in this repository is licensed under Mulan PSL v2.
 
 All documentation content is licensed under `CC BY-SA 4.0 <https://creativecommons.org/licenses/by-sa/4.0/>`_.
+
+.. toctree::
+   :maxdepth: 2
+   :caption: 功能文档
+   :hidden:
+
+   functional/index.md
 
 .. toctree::
    :maxdepth: 2
