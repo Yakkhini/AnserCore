@@ -1,0 +1,623 @@
+<!doctype html>
+<html class="no-js" lang="zh-CN" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="索引" href="../genindex.html"><link rel="search" title="搜索" href="../search.html"><link rel="next" title="微架构概述" href="../microarchitecture/index.html"><link rel="prev" title="AnserCore Documentation" href="../index.html">
+
+    <!-- Generated with Sphinx 9.1.0 and Furo 2025.12.19 -->
+        <title>RVA23 / RVB23 配置规范调研 - AnserCore 文档</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">AnserCore  文档</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">AnserCore  文档</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="搜索" name="q" aria-label="搜索">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">功能文档</span></p>
+<ul class="current">
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">RVA23 / RVB23 配置规范调研</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">微架构文档</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../microarchitecture/index.html">微架构概述</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../microarchitecture/01-frontend/index.html">前端</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../microarchitecture/02-backend/index.html">后端</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../microarchitecture/03-memory-system/index.html">仿存</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../microarchitecture/04-cache-subsystem/index.html">缓存子系统</a><input aria-label="Toggle navigation of 缓存子系统" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../microarchitecture/04-cache-subsystem/mshrctrl.html">MSHR 控制模块</a></li>
+</ul>
+</li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/functional/index.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <!--
+SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+<section id="rva23-rvb23">
+<h1>RVA23 / RVB23 配置规范调研<a class="headerlink" href="#rva23-rvb23" title="链接到此标题。">¶</a></h1>
+<p>Reference：<a class="reference external" href="https://docs.riscv.org/reference/home/index.html">RISC-V Ratified Specifications Library - Profiles</a></p>
+<p>RISC-V 指令集以其高度模块化与可定制化为显著特色之一。但是面临软件生态整合与市场推广时，过于碎片的规范约束给软件适配带来困难，降低了软件生态的泛用型。因此，在一般通用场景下约束更清晰的配置规范（Profiles）成为 RISC-V 的推荐解决方案。目前比较广泛使用的是 RVA23 配置规范和 RVB23 配置规范。其中 RVA23 配置规范针对高性能场景如服务器或者桌面平台的处理器规格需求，RVB23 配置规范针对嵌入式系统或边缘场景下的处理器规格需求。每一种配置文档在本质上都是对目前 RISC-V 指令集规范中认为有必要实现的指令集扩展的囊括。</p>
+<p>在 AnserCore 处理器核项目的前期调研与规格约束工作中，我们需要研判 RVA23 / RVB23 两种配置规范，检查其中的每一种扩展集在硬件微架构上进行功能或性能支持的设计成本。此文档会依据相关定义规范和手册简要介绍 RVA23 和 RVB23 的相关内容，作为后续调研工作的参考。</p>
+<section id="rva23">
+<h2>RVA23 配置规范规定列表<a class="headerlink" href="#rva23" title="链接到此标题。">¶</a></h2>
+<p>RVA23 配置规范分为用户态模式配置规范（RVA23U64）和特权级模式配置规范（RVA23S64）两类。它包括了一系列必要指令集扩展以及部分可被探测的可选指令集扩展。</p>
+<section id="rva23u64-profile">
+<h3>RVA23U64 Profile<a class="headerlink" href="#rva23u64-profile" title="链接到此标题。">¶</a></h3>
+<p>基础指令集：RV64I 小端序 + ECALL 指令引起对执行环境的陷入请求</p>
+<p>建议功能：执行未实现操作类型时引起非法指令异常</p>
+<section id="rva22u64">
+<h4>强制扩展（继承自 RVA22U64）<a class="headerlink" href="#rva22u64" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>M：整数乘除法</p></li>
+<li><p>A：原子指令</p></li>
+<li><p>F：单精度浮点指令</p></li>
+<li><p>D：双精度浮点指令</p></li>
+<li><p>C：压缩指令</p></li>
+<li><p>B：位操作指令</p></li>
+<li><p>Zicsr：CSR 指令，同时也是 F 扩展集的隐含依赖</p></li>
+<li><p>Zicntr：基础的计数器和计时器</p></li>
+<li><p>ZIhpm：硬件性能计数器</p></li>
+<li><p>Ziccif：规范定义扩展（Profile-Defined Extensions）。在具有可缓存和一致性属性的主存区域内，进行对齐取指时需要保证原子性。对运行时指令修改有帮助。</p></li>
+<li><p>Ziccrse</p></li>
+<li><p>Ziccamoa：规范定义扩展，在具有可缓存和一致性属性的主存区域内，支持全部的原子操作。</p></li>
+<li><p>Zicclsm：规范定义扩展，在具有可缓存和一致性属性的主存区域内支持非对齐仿存。</p></li>
+<li><p>Za64rs：</p></li>
+<li><p>Zihintpause：提示等待，在自旋场景下有用。可以实现为 NOP。</p></li>
+<li><p>Zic644b：体系结构缓存块为 64Byte，作为缓存管理操作（CMO）指令的基础。</p></li>
+<li><p>Zicbom：显式缓存一致性处理，保证 Non-Coherence DMA Device 场景的正确性。</p></li>
+<li><p>Zicbop：预取指令，可以实现为 NOP</p></li>
+<li><p>Zicboz：缓存块清零</p></li>
+<li><p>Zfhmin：半精度浮点操作</p></li>
+<li><p>Zkt：规范定义扩展，数据无关执行延迟，在密码学场景下阻止时序侧信道攻击</p></li>
+</ul>
+</section>
+<section id="rva23u64">
+<h4>强制扩展（RVA23U64 新增）<a class="headerlink" href="#rva23u64" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>V：向量扩展</p></li>
+<li><p>Zvfhmin：向量半精度浮点最小支持</p></li>
+<li><p>Zvbb：向量位操作</p></li>
+<li><p>Zvkt：向量数据无关执行延迟</p></li>
+<li><p>Zihintntl：非时间局部性提示</p></li>
+<li><p>Zicond：谓词化分支指令</p></li>
+<li><p>Zimop：潜在操作指令，即目前视为 NOP 但未来可能有实际含义的指令，用于将来的前向兼容</p></li>
+<li><p>Zcmop：潜在操作指令，定义在压缩指令空间</p></li>
+<li><p>Zcb：额外压缩指令</p></li>
+<li><p>Zfa：额外浮点指令</p></li>
+<li><p>Zawrs</p></li>
+<li><p>Supm：指针掩码（Pointer Masking）支持</p></li>
+</ul>
+</section>
+<section id="id1">
+<h4>可选扩展（地区政策原因）<a class="headerlink" href="#id1" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>Zvkng：向量加密支持带 GCM 检验的 NIST 算法族</p></li>
+<li><p>Zvksg：向量加密支持带 GCM 检验的中国商密算法族</p></li>
+</ul>
+</section>
+<section id="id2">
+<h4>可选扩展（未来可能强制）<a class="headerlink" href="#id2" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>Zabha：字节和半字原子内存操作</p></li>
+<li><p>Zacas：比较并交换指令</p></li>
+<li><p>Ziccamoc</p></li>
+<li><p>Zvbc：向量无进位乘法</p></li>
+<li><p>Zama16b</p></li>
+</ul>
+</section>
+<section id="id3">
+<h4>可选扩展（易被探查）<a class="headerlink" href="#id3" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>Zfh：标量半精度浮点计算</p></li>
+<li><p>Zbc：标量无进位乘法</p></li>
+<li><p>Zicfilp：前向控制流保护，在 Linux 7.0 启用，可 NOP</p></li>
+<li><p>Zicfiss：后向控制流保护</p></li>
+<li><p>Zvfh：向量半精度浮点计算</p></li>
+<li><p>Zfbfmin：标量 BF16 类型转换</p></li>
+<li><p>Zvfbfmin：向量 BF16 类型转换</p></li>
+<li><p>Zvfbfwma：向量 BF16 拓宽乘加</p></li>
+</ul>
+</section>
+<section id="id4">
+<h4>可选扩展（定位模糊的临时选项）<a class="headerlink" href="#id4" title="链接到此标题。">¶</a></h4>
+<p>无</p>
+</section>
+</section>
+<section id="rva23s64-profile">
+<h3>RVA23S64 Profile<a class="headerlink" href="#rva23s64-profile" title="链接到此标题。">¶</a></h3>
+<p>基础指令集：RV64I 小端序 + ECALL 指令</p>
+<p>用户态的 ECALL 指令引起到特权级的陷入，特权级的 ECALL 指令引起对执行环境的陷入。建议执行未实现操作类型时引起非法指令异常。</p>
+<section id="id5">
+<h4>强制扩展（非特权级扩展）<a class="headerlink" href="#id5" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>所有 RVA23U64 的强制扩展</p></li>
+<li><p>Zifencei：取指屏障，可能在未来被 Zjid 指令缓存一致性机制扩展替代。</p></li>
+</ul>
+</section>
+<section id="rva22s64">
+<h4>强制扩展（继承自 RVA22S64）<a class="headerlink" href="#rva22s64" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>Ss1p13：特权级架构版本 1.13，作为 Ss1p12 的替代</p></li>
+<li><p>Svbare：satp 裸机模式支持</p></li>
+<li><p>Sv39：基于页表的 Sv39 虚拟内存系统</p></li>
+<li><p>Svade：页表在 A 标志位被清空时的访问或者 D 标志位被清空时被写入产生页表错误异常</p></li>
+<li><p>Ssccptr：在具有可缓存和一致性属性的主存区域内支持硬件页表读取</p></li>
+<li><p>Sstvecd：stvec 支持 Direct 模式，并且在 Direct 模式内 BASE 部分可以保存任意四字节对齐的地址</p></li>
+<li><p>Sstvala：</p>
+<ul>
+<li><p>stval 必须在以下情况写入产生错误的虚拟地址：</p>
+<ul>
+<li><p>访存或者取指产生页表错误（Page Fault），Access Fault（访存错误），未对齐异常</p></li>
+<li><p>由于执行 EBREAK 或者 C.EBREAK 指令以外的原因引发的断点异常</p></li>
+</ul>
+</li>
+<li><p>而对于虚拟指令（Virtual Instruction，虚拟化拦截）和非法指令异常，stval 必须写入错误指令</p></li>
+</ul>
+</li>
+<li><p>Sscounterenw：必须通过 scounteren 来控制性能计数器读写权限</p></li>
+<li><p>Svpbmt：基于页表的内存类型（PMA，NC，I/O）</p></li>
+<li><p>Svinval：细粒度地址翻译缓存失效</p></li>
+<li><p>Svnapot：连续页聚合（和大页有点像，但是不一样）</p></li>
+<li><p>Sstc：特权级时钟中断（消除去机器级中断的开销）</p></li>
+<li><p>Sscofpmf：计数器溢出以及基于模式的过滤</p></li>
+<li><p>Ssnpm：指针掩码支持（特权级支持用户级）</p></li>
+<li><p>Ssu64xl：必须可以支持用户态 64 位架构</p></li>
+<li><p>Sha：参数化虚拟化扩展</p>
+<ul>
+<li><p>H：虚拟化扩展</p></li>
+<li><p>Ssstateen</p></li>
+<li><p>Shcounterenw</p></li>
+<li><p>Shvstvala</p></li>
+<li><p>Shtvala</p></li>
+<li><p>Shvstvecd</p></li>
+<li><p>Shvsatpa</p></li>
+<li><p>Shgatpa</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="id6">
+<h4>可选扩展（地区政策原因）<a class="headerlink" href="#id6" title="链接到此标题。">¶</a></h4>
+<p>无</p>
+</section>
+<section id="id7">
+<h4>可选扩展（未来可能被强制）<a class="headerlink" href="#id7" title="链接到此标题。">¶</a></h4>
+<p>无</p>
+</section>
+<section id="id8">
+<h4>可选扩展（易被探查）<a class="headerlink" href="#id8" title="链接到此标题。">¶</a></h4>
+<p>继承自 RVA22S64：</p>
+<ul class="simple">
+<li><p>Sv48：基于页表的 48 位虚拟内存系统</p></li>
+<li><p>Sv57：基于页表的 57 位虚拟内存系统</p></li>
+<li><p>Zkr：熵源特权级寄存器</p></li>
+</ul>
+<p>RVA23S64 新增：</p>
+<ul class="simple">
+<li><p>Svadu：硬件 A/D 标志位更新</p></li>
+<li><p>Sdtrig：硬件调试触发器</p></li>
+<li><p>Ssstrict：对标准/保留编码空间里没有实现的指令或 CSR，必须明确抛出 <code class="docutils literal notranslate"><span class="pre">Illegal</span> <span class="pre">Instruction</span></code></p></li>
+<li><p>Svvptc：分配页表项可以被硬件观察到，省去 SFENCE.VMA/SINVAL.VMA</p></li>
+<li><p>Sspm：特权级自身指针掩码支持</p></li>
+</ul>
+</section>
+<section id="id9">
+<h4>可选扩展（定位模糊的临时选项）<a class="headerlink" href="#id9" title="链接到此标题。">¶</a></h4>
+<p>无</p>
+</section>
+</section>
+</section>
+<section id="rvb23">
+<h2>RVB23 配置规范规格差异<a class="headerlink" href="#rvb23" title="链接到此标题。">¶</a></h2>
+<p>基础指令集以及建议实现与 RVA 一致。</p>
+<section id="rvb23u64-profile">
+<h3>RVB23U64 Profile<a class="headerlink" href="#rvb23u64-profile" title="链接到此标题。">¶</a></h3>
+<section id="id10">
+<h4>强制扩展<a class="headerlink" href="#id10" title="链接到此标题。">¶</a></h4>
+<p>没有 Zfhmin V Zvfhmin Zvbb Zvkt，没有 Supm</p>
+</section>
+<section id="id11">
+<h4>可选扩展（地区政策原因）<a class="headerlink" href="#id11" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>RVA23U64 的地区可选扩展 Zvkng Zvksg</p></li>
+</ul>
+<p>新增的可选扩展：</p>
+<ul class="simple">
+<li><p>Zvkg</p></li>
+<li><p>Zvknc</p></li>
+<li><p>Zvksc</p></li>
+<li><p>Zkn</p></li>
+<li><p>Zks</p></li>
+</ul>
+</section>
+<section id="id12">
+<h4>可选扩展（未来可能强制）<a class="headerlink" href="#id12" title="链接到此标题。">¶</a></h4>
+<p>没有 Zvbc</p>
+</section>
+<section id="id13">
+<h4>可选扩展（易被探查）<a class="headerlink" href="#id13" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>在 RVA23U64 中是必要扩展：</p>
+<ul>
+<li><p>Zfhmin Half-precision floating-point.</p></li>
+<li><p>V Vector extension.</p></li>
+<li><p>Zvfhmin Vector minimal half-precision floating-point.</p></li>
+<li><p>Zvbb Vector basic bit-manipulation instructions.</p></li>
+<li><p>Zvkt Vector data-independent execution latency.</p></li>
+<li><p>Supm Pointer masking, with the execution environment providing a means to select PMLEN=0 and PMLEN=7 at minimum.</p></li>
+</ul>
+</li>
+<li><p>其他所有 RVA23U64 中易被探查的可选扩展</p></li>
+<li><p>RVA23U64 中未来可能强制，但是在 RVB23U64 中未来继续保持可被探查的扩展：Zvbc</p></li>
+</ul>
+</section>
+<section id="id14">
+<h4>可选扩展（定位模糊的临时选项）<a class="headerlink" href="#id14" title="链接到此标题。">¶</a></h4>
+<p>无（和 RVA23U64 一致）</p>
+</section>
+</section>
+<section id="rvb23s64">
+<h3>RVB23S64<a class="headerlink" href="#rvb23s64" title="链接到此标题。">¶</a></h3>
+<section id="id15">
+<h4>强制扩展<a class="headerlink" href="#id15" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>所有 RVB23U64 的强制扩展，与 RVA23U64 的差异依然是没有 V Zvfhmin Zvbb Zvkt，没有 Supm</p></li>
+<li><p>特权级扩展中没有 Ssnpm 和 Sha</p></li>
+</ul>
+</section>
+<section id="id16">
+<h4>可选扩展（地区政策原因）<a class="headerlink" href="#id16" title="链接到此标题。">¶</a></h4>
+<p>无（和 RVA23U64 一致）</p>
+</section>
+<section id="id17">
+<h4>可选扩展（未来可能被强制）<a class="headerlink" href="#id17" title="链接到此标题。">¶</a></h4>
+<p>无（和 RVA23U64 一致）</p>
+</section>
+<section id="id18">
+<h4>可选扩展（易被探查）<a class="headerlink" href="#id18" title="链接到此标题。">¶</a></h4>
+<ul class="simple">
+<li><p>在 RVA23S64 中为强制扩展：Ssnpm，Sha</p></li>
+<li><p>If the hypervisor extension is implemented and pointer masking (Ssnpm) is supported then henvcfg. PME must support at minimum, settings PMLEN=0 and PMLEN=7.</p></li>
+</ul>
+</section>
+</section>
+</section>
+<section id="id19">
+<h2>结论<a class="headerlink" href="#id19" title="链接到此标题。">¶</a></h2>
+<p>我们的目标可以是 RVB23（对标 SiFive P550 GEN3），同 RVA23 相比有四个区别：</p>
+<ul class="simple">
+<li><p>相比于 RVA23，RVB23 的 V 和 H 都不是强制性的</p></li>
+<li><p>相比于 RVA23，RVB23 的半精度浮点转换不是强制性的</p></li>
+<li><p>相比于 RVA23，RVB23 的指针掩码（Pointer Masking）机制不是必须的</p></li>
+<li><p>相比于 RVA23，RVB23 的地区性可选加密扩展多了一些标量和低成本扩展</p></li>
+</ul>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="../microarchitecture/index.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">微架构概述</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="../index.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Home</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, ECOS Team
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">RVA23 / RVB23 配置规范调研</a><ul>
+<li><a class="reference internal" href="#rva23">RVA23 配置规范规定列表</a><ul>
+<li><a class="reference internal" href="#rva23u64-profile">RVA23U64 Profile</a><ul>
+<li><a class="reference internal" href="#rva22u64">强制扩展（继承自 RVA22U64）</a></li>
+<li><a class="reference internal" href="#rva23u64">强制扩展（RVA23U64 新增）</a></li>
+<li><a class="reference internal" href="#id1">可选扩展（地区政策原因）</a></li>
+<li><a class="reference internal" href="#id2">可选扩展（未来可能强制）</a></li>
+<li><a class="reference internal" href="#id3">可选扩展（易被探查）</a></li>
+<li><a class="reference internal" href="#id4">可选扩展（定位模糊的临时选项）</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#rva23s64-profile">RVA23S64 Profile</a><ul>
+<li><a class="reference internal" href="#id5">强制扩展（非特权级扩展）</a></li>
+<li><a class="reference internal" href="#rva22s64">强制扩展（继承自 RVA22S64）</a></li>
+<li><a class="reference internal" href="#id6">可选扩展（地区政策原因）</a></li>
+<li><a class="reference internal" href="#id7">可选扩展（未来可能被强制）</a></li>
+<li><a class="reference internal" href="#id8">可选扩展（易被探查）</a></li>
+<li><a class="reference internal" href="#id9">可选扩展（定位模糊的临时选项）</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#rvb23">RVB23 配置规范规格差异</a><ul>
+<li><a class="reference internal" href="#rvb23u64-profile">RVB23U64 Profile</a><ul>
+<li><a class="reference internal" href="#id10">强制扩展</a></li>
+<li><a class="reference internal" href="#id11">可选扩展（地区政策原因）</a></li>
+<li><a class="reference internal" href="#id12">可选扩展（未来可能强制）</a></li>
+<li><a class="reference internal" href="#id13">可选扩展（易被探查）</a></li>
+<li><a class="reference internal" href="#id14">可选扩展（定位模糊的临时选项）</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#rvb23s64">RVB23S64</a><ul>
+<li><a class="reference internal" href="#id15">强制扩展</a></li>
+<li><a class="reference internal" href="#id16">可选扩展（地区政策原因）</a></li>
+<li><a class="reference internal" href="#id17">可选扩展（未来可能被强制）</a></li>
+<li><a class="reference internal" href="#id18">可选扩展（易被探查）</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id19">结论</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=7d86a446"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="../_static/translations.js?v=540d3cec"></script>
+    </body>
+</html>
