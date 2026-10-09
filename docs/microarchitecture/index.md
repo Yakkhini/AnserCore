@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
-SPDX-License-Identifier: CC-BY-SA-4.0
--->
-
 # 微架构概述
 
 当前 AnserCore 的微架构可以分为四个主要组件：

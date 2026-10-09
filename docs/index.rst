@@ -1,6 +1,3 @@
-.. SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
-   SPDX-License-Identifier: CC-BY-SA-4.0
-
 .. Anser Core documentation master file, created by
    sphinx-quickstart on Fri Jul  3 13:55:16 2026.
    You can adapt this file completely to your liking, but it should at least

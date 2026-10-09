@@ -1,0 +1,20 @@
+version = 1
+
+# Project configuration and automation files use the Mulan PSL v2 license.
+[[annotations]]
+path = [
+    ".gitignore",
+    ".gitlint",
+    ".github/**/*.yaml",
+    ".github/**/*.yml",
+    "docs/requirements.txt",
+    "flake.lock",
+]
+SPDX-FileCopyrightText = "2026 ECOS Team <ecos-all@ict.ac.cn>"
+SPDX-License-Identifier = "MulanPSL-2.0"
+
+# Markdown and reStructuredText documentation uses CC BY 4.0.
+[[annotations]]
+path = ["**/*.md", "**/*.rst", "docs/_static/dummy_file"]
+SPDX-FileCopyrightText = "2026 ECOS Team <ecos-all@ict.ac.cn>"
+SPDX-License-Identifier = "CC-BY-4.0"
