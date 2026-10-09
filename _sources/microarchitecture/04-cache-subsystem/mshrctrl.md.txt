@@ -1,6 +1,3 @@
-% SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
-% SPDX-License-Identifier: CC-BY-SA-4.0
-
 # MSHR 控制模块
 
 ## 功能描述

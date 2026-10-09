@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
-SPDX-License-Identifier: CC-BY-SA-4.0
--->
-
 # RVA23 / RVB23 配置规范调研
 
 Reference：[RISC-V Ratified Specifications Library - Profiles](https://docs.riscv.org/reference/home/index.html)
