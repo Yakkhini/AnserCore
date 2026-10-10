@@ -62,7 +62,7 @@ RegNext(io.my_signal)  // good
 Reg(io.my_signal)      // WRONG! Creates a Reg of the same type as io.a, this will be an elaboration error
 ```
 
-`Reg` 的 `Vec`，而不是 `Vec` 的 `Reg`\*\*，例如
+`Reg` 的 `Vec`，而不是 `Vec` 的 `Reg`，例如
 
 ```scala
 val lotsOfRegs = RegInit(VecInit(10, UInt(32.W)))

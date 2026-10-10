@@ -324,7 +324,7 @@
 <span class="nc">Reg</span><span class="p">(</span><span class="n">io</span><span class="p">.</span><span class="n">my_signal</span><span class="p">)</span><span class="w">      </span><span class="c1">// WRONG! Creates a Reg of the same type as io.a, this will be an elaboration error</span>
 </pre></div>
 </div>
-<p><code class="docutils literal notranslate"><span class="pre">Reg</span></code> 的 <code class="docutils literal notranslate"><span class="pre">Vec</span></code>，而不是 <code class="docutils literal notranslate"><span class="pre">Vec</span></code> 的 <code class="docutils literal notranslate"><span class="pre">Reg</span></code>**，例如</p>
+<p><code class="docutils literal notranslate"><span class="pre">Reg</span></code> 的 <code class="docutils literal notranslate"><span class="pre">Vec</span></code>，而不是 <code class="docutils literal notranslate"><span class="pre">Vec</span></code> 的 <code class="docutils literal notranslate"><span class="pre">Reg</span></code>，例如</p>
 <div class="highlight-scala notranslate"><div class="highlight"><pre><span></span><span class="kd">val</span><span class="w"> </span><span class="n">lotsOfRegs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nc">RegInit</span><span class="p">(</span><span class="nc">VecInit</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="nc">UInt</span><span class="p">(</span><span class="mi">32</span><span class="p">.</span><span class="nc">W</span><span class="p">)))</span>
 </pre></div>
 </div>
