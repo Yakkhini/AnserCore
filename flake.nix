@@ -85,6 +85,10 @@
           programs.alejandra.enable = true;
           programs.autocorrect.enable = true;
           programs.mdformat.enable = true;
+          programs.scalafmt = {
+            enable = true;
+            includes = ["*.scala" "*.mill"];
+          };
 
           settings.formatter.sphinx-lint = {
             command = "${pkgs.sphinx-lint}/bin/sphinx-lint";
