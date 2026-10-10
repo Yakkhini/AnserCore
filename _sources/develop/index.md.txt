@@ -1,0 +1,73 @@
+# AnserCore 编程风格规范
+
+目前 AnserCore 项目还处于早期开发阶段。我们希望尽可能地以一个标准和良好的风格来呈现代码，提升项目质量。但由于 Scala 是一个灵活性较强、抽象层次较高的语言，所以我们尚未找到实际模块设计与组织的最佳实践。在当前探索阶段，以下风格指南作为开发人员的基本参考，并且以相关自动化检查工具作为强约束。在未来，我们希望可以通过开发实践来不断细化并获得一个良好完整的 Chisel 风格规范。
+
+**对于风格规范中尚未涉及之处与描述模糊冲突之处，以代码呈现效果的可读性与可维护性更优为目标进行评审。**
+
+## Scala 语法风格
+
+AnserCore 项目的 Scala 语法风格基本遵循 [Databricks Scala 编程风格指南](https://github.com/databricks/databricks-style-guide) 和 [Scala 官方风格指南](https://docs.scala-lang.org/style/)。
+
+其中部分的规则约束已经反映在了项目根目录的 `.scalafmt.conf` 和 `.scalafix.conf` 中，并且可以结合相应工具进行自动格式化或风格检查。
+
+## Chisel 语法风格
+
+Chisel 是嵌入于 Scala 编程语言的硬件描述语言。除了上一节提到的 Scala 语法风格外，Chisel 还遵循 [Chisel 官方风格指南](https://www.chisel-lang.org/docs/developers/style)。
+
+### 调整 1：大驼峰命名
+
+与 Chisel 官方指南不同，驼峰命名中的缩写不会视为普通单词，即在大驼峰命名中全大写，在小驼峰命名中作为起始时全小写。
+
+Prose form | UpperCamelCase | lowerCamelCase | Incorrect
+:------------- | :------------- | :------------- | :------------
+find GCD | FindGCD | findGCD | ~~findGcd~~
+state for FSM | StateForFSM | stateForFSM | ~~stateForFsm~~
+mock dut | MockDUT | mockDUT | ~~MockDut~~
+FIFO Generator | FIFOGenerator | fifoGenerator | ~~FifoGenerator~~
+
+### 补充 2：寄存器
+
+寄存器（和其类型）应该按以下格式指定：
+
+```scala
+Reg(UInt())               // good!
+Reg(UInt(8.W))            // also good!
+
+Reg(chiselTypeOf(io.my_signal) // good!
+```
+
+不要通过构造 `Reg(x)` 告诉 Reg 该类型为 `x`。它 **不** 告诉 Reg 初始值，也不会将信号添加 `Delay`！
+
+```scala
+Reg(UInt(0))      // bad!  Returns a Reg of type UInt and unknown width.
+Reg(UInt(0,15))   // bad!  Returns a Reg of type UInt with width 15.
+
+Reg(io.my_signal) // bad. This makes a Reg of type io.my_signal, but the intention is not clear!
+                  // It can be easily misread as Reg(next=io.my_signal).
+```
+
+寄存器应该按以下格式初始化：
+
+```scala
+RegInit(0.U(15.W))   // good, initialized register to value 0 with width 15
+
+Reg(0.U(15.W))       // WRONG! This will be an elaboration error
+```
+
+延迟一个信号（即将其接入寄存器）应该按以下格式执行：
+
+```scala
+RegNext(io.my_signal)  // good
+
+Reg(io.my_signal)      // WRONG! Creates a Reg of the same type as io.a, this will be an elaboration error
+```
+
+`Reg` 的 `Vec`，而不是 `Vec` 的 `Reg`\*\*，例如
+
+```scala
+val lotsOfRegs = RegInit(VecInit(10, UInt(32.W)))
+```
+
+## C/C++ 语法风格
+
+对于 C/C++ 语言，AnserCore 项目将会使用 Clang 格式化工具的 LLVM 预设风格。

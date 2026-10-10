@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="索引" href="../genindex.html"><link rel="search" title="搜索" href="../search.html"><link rel="next" title="前端" href="01-frontend/index.html"><link rel="prev" title="RVA23 / RVB23 配置规范调研" href="../functional/index.html">
+<link rel="index" title="索引" href="../genindex.html"><link rel="search" title="搜索" href="../search.html"><link rel="prev" title="MSHR 控制模块" href="../microarchitecture/04-cache-subsystem/mshrctrl.html">
 
     <!-- Generated with Sphinx 9.1.0 and Furo 2025.12.19 -->
-        <title>微架构概述 - AnserCore 文档</title>
+        <title>AnserCore 编程风格规范 - AnserCore 文档</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
@@ -195,19 +195,19 @@
 <li class="toctree-l1"><a class="reference internal" href="../functional/index.html">RVA23 / RVB23 配置规范调研</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">微架构文档</span></p>
-<ul class="current">
-<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">微架构概述</a></li>
-<li class="toctree-l1"><a class="reference internal" href="01-frontend/index.html">前端</a></li>
-<li class="toctree-l1"><a class="reference internal" href="02-backend/index.html">后端</a></li>
-<li class="toctree-l1"><a class="reference internal" href="03-memory-system/index.html">仿存</a></li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="04-cache-subsystem/index.html">缓存子系统</a><input aria-label="Toggle navigation of 缓存子系统" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="04-cache-subsystem/mshrctrl.html">MSHR 控制模块</a></li>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../microarchitecture/index.html">微架构概述</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../microarchitecture/01-frontend/index.html">前端</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../microarchitecture/02-backend/index.html">后端</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../microarchitecture/03-memory-system/index.html">仿存</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../microarchitecture/04-cache-subsystem/index.html">缓存子系统</a><input aria-label="Toggle navigation of 缓存子系统" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../microarchitecture/04-cache-subsystem/mshrctrl.html">MSHR 控制模块</a></li>
 </ul>
 </li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">开发文档</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../develop/index.html">AnserCore 编程风格规范</a></li>
+<ul class="current">
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">AnserCore 编程风格规范</a></li>
 </ul>
 
 </div>
@@ -228,7 +228,7 @@
         </a>
         <div class="content-icon-container">
           <div class="view-this-page">
-  <a class="muted-link" href="../_sources/microarchitecture/index.md.txt" title="View this page">
+  <a class="muted-link" href="../_sources/develop/index.md.txt" title="View this page">
     <svg><use href="#svg-eye"></use></svg>
     <span class="visually-hidden">View this page</span>
   </a>
@@ -246,46 +246,93 @@
           </label>
         </div>
         <article role="main" id="furo-main-content">
-          <section id="id1">
-<h1>微架构概述<a class="headerlink" href="#id1" title="链接到此标题。">¶</a></h1>
-<p>当前 AnserCore 的微架构可以分为四个主要组件：</p>
-<ul class="simple">
-<li><p><strong>前端（Frontend）</strong>: 前端负责分支预测、指令取回、指令解码等功能处理。</p></li>
-<li><p><strong>后端（Backend）</strong>: 后端负责乱序调度、指令执行、数据写回等功能处理。</p></li>
-<li><p><strong>仿存（Memory System）</strong>: 仿存负责管理内存层级，包括 LSU、MMU 和 L1 DCache。</p></li>
-<li><p><strong>缓存子系统（Cache Subsystem）</strong>: 缓存子系统负责 L2 缓存的设计和实现。</p></li>
-</ul>
+          <section id="ansercore">
+<h1>AnserCore 编程风格规范<a class="headerlink" href="#ansercore" title="链接到此标题。">¶</a></h1>
+<p>目前 AnserCore 项目还处于早期开发阶段。我们希望尽可能地以一个标准和良好的风格来呈现代码，提升项目质量。但由于 Scala 是一个灵活性较强、抽象层次较高的语言，所以我们尚未找到实际模块设计与组织的最佳实践。在当前探索阶段，以下风格指南作为开发人员的基本参考，并且以相关自动化检查工具作为强约束。在未来，我们希望可以通过开发实践来不断细化并获得一个良好完整的 Chisel 风格规范。</p>
+<p><strong>对于风格规范中尚未涉及之处与描述模糊冲突之处，以代码呈现效果的可读性与可维护性更优为目标进行评审。</strong></p>
+<section id="scala">
+<h2>Scala 语法风格<a class="headerlink" href="#scala" title="链接到此标题。">¶</a></h2>
+<p>AnserCore 项目的 Scala 语法风格基本遵循 <a class="reference external" href="https://github.com/databricks/databricks-style-guide">Databricks Scala 编程风格指南</a> 和 <a class="reference external" href="https://docs.scala-lang.org/style/">Scala 官方风格指南</a>。</p>
+<p>其中部分的规则约束已经反映在了项目根目录的 <code class="docutils literal notranslate"><span class="pre">.scalafmt.conf</span></code> 和 <code class="docutils literal notranslate"><span class="pre">.scalafix.conf</span></code> 中，并且可以结合相应工具进行自动格式化或风格检查。</p>
+</section>
+<section id="chisel">
+<h2>Chisel 语法风格<a class="headerlink" href="#chisel" title="链接到此标题。">¶</a></h2>
+<p>Chisel 是嵌入于 Scala 编程语言的硬件描述语言。除了上一节提到的 Scala 语法风格外，Chisel 还遵循 <a class="reference external" href="https://www.chisel-lang.org/docs/developers/style">Chisel 官方风格指南</a>。</p>
+<section id="id1">
+<h3>调整 1：大驼峰命名<a class="headerlink" href="#id1" title="链接到此标题。">¶</a></h3>
+<p>与 Chisel 官方指南不同，驼峰命名中的缩写不会视为普通单词，即在大驼峰命名中全大写，在小驼峰命名中作为起始时全小写。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p>Prose form</p></th>
+<th class="head text-left"><p>UpperCamelCase</p></th>
+<th class="head text-left"><p>lowerCamelCase</p></th>
+<th class="head text-left"><p>Incorrect</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>find GCD</p></td>
+<td class="text-left"><p>FindGCD</p></td>
+<td class="text-left"><p>findGCD</p></td>
+<td class="text-left"><p>~~findGcd~~</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>state for FSM</p></td>
+<td class="text-left"><p>StateForFSM</p></td>
+<td class="text-left"><p>stateForFSM</p></td>
+<td class="text-left"><p>~~stateForFsm~~</p></td>
+</tr>
+<tr class="row-even"><td class="text-left"><p>mock dut</p></td>
+<td class="text-left"><p>MockDUT</p></td>
+<td class="text-left"><p>mockDUT</p></td>
+<td class="text-left"><p>~~MockDut~~</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>FIFO Generator</p></td>
+<td class="text-left"><p>FIFOGenerator</p></td>
+<td class="text-left"><p>fifoGenerator</p></td>
+<td class="text-left"><p>~~FifoGenerator~~</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
 <section id="id2">
-<h2>文档规范<a class="headerlink" href="#id2" title="链接到此标题。">¶</a></h2>
-<p>此处的文档规范仅对当前微架构文档编写内容的结构进行约束，尽可能保障 AnserCore 初期文档体系的严谨性，以指导后续处理器核的正式开发。</p>
-<p>一般性的，从模块拆分的角度看，可以在四个主要组件下编写各个下一级子模块的文档。不建议将模块拆分得太碎。</p>
-<p>文档格式主要由 MyST 标记语言进行编写。对于任何模块的文档编写，建议包括以下内容：</p>
-<dl class="simple myst">
-<dt>功能描述</dt><dd><p>从模块动机和微架构特性的角度，用语言文字描述此模块的功能与性能方案，方便读者理解此模块的工作方式与性能特征。如果存在下一级子模块，则需要在这一部分进行列举和简单描述。</p>
-</dd>
-<dt>参数描述</dt><dd><p>如果此模块支持参数化配置，需要描述此模块的参数类型、含义、默认值、合法值等。考虑使用 MyST 的 <code class="docutils literal notranslate"><span class="pre">fieldlist</span></code> 或 <code class="docutils literal notranslate"><span class="pre">deflist</span></code> 来编写参数列表。</p>
-</dd>
-<dt>接口描述</dt><dd><p>描述此模块的接口信号，包括信号名、信号分组、数据内容和含义、涉及事务、连接的对向模块等。考虑使用 MyST 的 <code class="docutils literal notranslate"><span class="pre">fieldlist</span></code> 或 <code class="docutils literal notranslate"><span class="pre">deflist</span></code> 来编写信号列表。</p>
-</dd>
-<dt>事务描述</dt><dd><p>从事务粒度描述模块对外作为主机或者从机的信号时序行为，需要在形式化程度上尽可能和波形时序图等价。</p>
-</dd>
-<dt>存储组织与数据结构</dt><dd><p>对于有持久化存储数据的模块，需要描述其存储组织方法与内部数据结构定义。存储组织方法指的是数据保存的器件类型（如寄存器堆、SRAM 等）与组织方式（如多阵列、多存储体等）。内部数据结构则对这些数据进行结构化描述，例如队列或表的结构中一个表项（Entry）包括哪些成员，以及它们的含义或作用等。</p>
-</dd>
-<dt>流水级行为</dt><dd><p>对于流水化模块，需要描述各个流水级在时钟周期内的行为。</p>
-</dd>
-<dt>状态机行为</dt><dd><p>描述此模块的状态机设计，以及每个状态处理的业务逻辑。</p>
-</dd>
-</dl>
-<p>上述的第一个、第二个部分为通用性质的描述。第三个、第四个部分为模块对外形态的描述，用于其他模块的维护者理解此模块的行为，以支持相关模块的开发工作。第五个、第六个和第七个部分为模块内部形态的描述，用于此模块维护者后续的实现、迭代等开发工作。对于可参数化模块，在一般情况下各个内容部分基于默认值的假设编写，如果存在某些参数下功能的边界行为或者特例，有必要时也可以补充。</p>
-<p>从提交规范上，贡献者每次提交 PR 时需要对涉及的新增、修改或删除的范围进行约束，不要将过于宽泛的改动以一次提交完成。文档的提交约定同样遵循整个仓库的风格，需要声明 <code class="docutils literal notranslate"><span class="pre">docs</span></code> 作用域和顶层组件名称的作用域，例如：</p>
-<div class="highlight-text notranslate"><div class="highlight"><pre><span></span># Note that the scope `frontend` is valid and the scope `icache` is invalid in documentation commits.
-[docs, frontend] add ICache documentation
-[docs, backend] fix typos in issue queue description
-[docs, memory] merge load queue and store queue doc files
-[docs, l2cache] remove music files since unuseful
+<h3>补充 2：寄存器<a class="headerlink" href="#id2" title="链接到此标题。">¶</a></h3>
+<p>寄存器（和其类型）应该按以下格式指定：</p>
+<div class="highlight-scala notranslate"><div class="highlight"><pre><span></span><span class="nc">Reg</span><span class="p">(</span><span class="nc">UInt</span><span class="p">())</span><span class="w">               </span><span class="c1">// good!</span>
+<span class="nc">Reg</span><span class="p">(</span><span class="nc">UInt</span><span class="p">(</span><span class="mi">8</span><span class="p">.</span><span class="nc">W</span><span class="p">))</span><span class="w">            </span><span class="c1">// also good!</span>
+
+<span class="nc">Reg</span><span class="p">(</span><span class="n">chiselTypeOf</span><span class="p">(</span><span class="n">io</span><span class="p">.</span><span class="n">my_signal</span><span class="p">)</span><span class="w"> </span><span class="c1">// good!</span>
 </pre></div>
 </div>
-<p>从排版规范来看，以 <a class="reference external" href="https://github.com/sparanoid/chinese-copywriting-guidelines">中文文案排版指北</a> 为准。目前一些格式检查的 CI / PR 检查工具已经部署到仓库内，如果贡献内容存在格式问题预期会暴露出来。</p>
+<p>不要通过构造 <code class="docutils literal notranslate"><span class="pre">Reg(x)</span></code> 告诉 Reg 该类型为 <code class="docutils literal notranslate"><span class="pre">x</span></code>。它 <strong>不</strong> 告诉 Reg 初始值，也不会将信号添加 <code class="docutils literal notranslate"><span class="pre">Delay</span></code>！</p>
+<div class="highlight-scala notranslate"><div class="highlight"><pre><span></span><span class="nc">Reg</span><span class="p">(</span><span class="nc">UInt</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="w">      </span><span class="c1">// bad!  Returns a Reg of type UInt and unknown width.</span>
+<span class="nc">Reg</span><span class="p">(</span><span class="nc">UInt</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="mi">15</span><span class="p">))</span><span class="w">   </span><span class="c1">// bad!  Returns a Reg of type UInt with width 15.</span>
+
+<span class="nc">Reg</span><span class="p">(</span><span class="n">io</span><span class="p">.</span><span class="n">my_signal</span><span class="p">)</span><span class="w"> </span><span class="c1">// bad. This makes a Reg of type io.my_signal, but the intention is not clear!</span>
+<span class="w">                  </span><span class="c1">// It can be easily misread as Reg(next=io.my_signal).</span>
+</pre></div>
+</div>
+<p>寄存器应该按以下格式初始化：</p>
+<div class="highlight-scala notranslate"><div class="highlight"><pre><span></span><span class="nc">RegInit</span><span class="p">(</span><span class="mi">0</span><span class="p">.</span><span class="nc">U</span><span class="p">(</span><span class="mi">15</span><span class="p">.</span><span class="nc">W</span><span class="p">))</span><span class="w">   </span><span class="c1">// good, initialized register to value 0 with width 15</span>
+
+<span class="nc">Reg</span><span class="p">(</span><span class="mi">0</span><span class="p">.</span><span class="nc">U</span><span class="p">(</span><span class="mi">15</span><span class="p">.</span><span class="nc">W</span><span class="p">))</span><span class="w">       </span><span class="c1">// WRONG! This will be an elaboration error</span>
+</pre></div>
+</div>
+<p>延迟一个信号（即将其接入寄存器）应该按以下格式执行：</p>
+<div class="highlight-scala notranslate"><div class="highlight"><pre><span></span><span class="nc">RegNext</span><span class="p">(</span><span class="n">io</span><span class="p">.</span><span class="n">my_signal</span><span class="p">)</span><span class="w">  </span><span class="c1">// good</span>
+
+<span class="nc">Reg</span><span class="p">(</span><span class="n">io</span><span class="p">.</span><span class="n">my_signal</span><span class="p">)</span><span class="w">      </span><span class="c1">// WRONG! Creates a Reg of the same type as io.a, this will be an elaboration error</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">Reg</span></code> 的 <code class="docutils literal notranslate"><span class="pre">Vec</span></code>，而不是 <code class="docutils literal notranslate"><span class="pre">Vec</span></code> 的 <code class="docutils literal notranslate"><span class="pre">Reg</span></code>**，例如</p>
+<div class="highlight-scala notranslate"><div class="highlight"><pre><span></span><span class="kd">val</span><span class="w"> </span><span class="n">lotsOfRegs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nc">RegInit</span><span class="p">(</span><span class="nc">VecInit</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="nc">UInt</span><span class="p">(</span><span class="mi">32</span><span class="p">.</span><span class="nc">W</span><span class="p">)))</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="c-c">
+<h2>C/C++ 语法风格<a class="headerlink" href="#c-c" title="链接到此标题。">¶</a></h2>
+<p>对于 C/C++ 语言，AnserCore 项目将会使用 Clang 格式化工具的 LLVM 预设风格。</p>
 </section>
 </section>
 
@@ -294,23 +341,15 @@
       <footer>
         
         <div class="related-pages">
-          <a class="next-page" href="01-frontend/index.html">
-              <div class="page-info">
-                <div class="context">
-                  <span>Next</span>
-                </div>
-                <div class="title">前端</div>
-              </div>
-              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
-            </a>
-          <a class="prev-page" href="../functional/index.html">
+          
+          <a class="prev-page" href="../microarchitecture/04-cache-subsystem/mshrctrl.html">
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
                 <div class="context">
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">RVA23 / RVB23 配置规范调研</div>
+                <div class="title">MSHR 控制模块</div>
                 
               </div>
             </a>
@@ -344,8 +383,14 @@
         <div class="toc-tree-container">
           <div class="toc-tree">
             <ul>
-<li><a class="reference internal" href="#">微架构概述</a><ul>
-<li><a class="reference internal" href="#id2">文档规范</a></li>
+<li><a class="reference internal" href="#">AnserCore 编程风格规范</a><ul>
+<li><a class="reference internal" href="#scala">Scala 语法风格</a></li>
+<li><a class="reference internal" href="#chisel">Chisel 语法风格</a><ul>
+<li><a class="reference internal" href="#id1">调整 1：大驼峰命名</a></li>
+<li><a class="reference internal" href="#id2">补充 2：寄存器</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#c-c">C/C++ 语法风格</a></li>
 </ul>
 </li>
 </ul>
