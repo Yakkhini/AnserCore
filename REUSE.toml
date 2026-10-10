@@ -3,14 +3,8 @@ version = 1
 # Project configuration and automation files use the Mulan PSL v2 license.
 [[annotations]]
 path = [
-    ".gitignore",
-    ".gitlint",
     ".github/**/*.yaml",
     ".github/**/*.yml",
-    ".scalafix.conf",
-    ".scalafmt.conf",
-    "docs/requirements.txt",
-    "flake.lock",
 ]
 SPDX-FileCopyrightText = "2026 ECOS Team <ecos-all@ict.ac.cn>"
 SPDX-License-Identifier = "MulanPSL-2.0"
@@ -20,3 +14,16 @@ SPDX-License-Identifier = "MulanPSL-2.0"
 path = ["**/*.md", "**/*.rst", "docs/_static/dummy_file"]
 SPDX-FileCopyrightText = "2026 ECOS Team <ecos-all@ict.ac.cn>"
 SPDX-License-Identifier = "CC-BY-4.0"
+
+# Auxiliary files use the Unlicense.
+[[annotations]]
+path = [
+    ".gitignore",
+    ".gitlint",
+    ".scalafix.conf",
+    ".scalafmt.conf",
+    "docs/requirements.txt",
+    "flake.lock",
+]
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "Unlicense"
