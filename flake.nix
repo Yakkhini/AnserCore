@@ -47,6 +47,7 @@
 
           packages = [
             pkgs.reuse
+            pkgs.scalafix
 
             (pkgs.python3.withPackages (ps: with ps; [sphinx myst-parser furo]))
           ];

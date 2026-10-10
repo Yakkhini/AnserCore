@@ -7,6 +7,7 @@ path = [
     ".gitlint",
     ".github/**/*.yaml",
     ".github/**/*.yml",
+    ".scalafix.conf",
     ".scalafmt.conf",
     "docs/requirements.txt",
     "flake.lock",
