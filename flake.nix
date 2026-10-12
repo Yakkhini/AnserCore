@@ -33,30 +33,19 @@
         system,
         ...
       }: rec {
+        _module.args.pkgs = import inputs.nixpkgs {
+          inherit system;
+          config = {
+            allowUnfree = true;
+          };
+        };
+
         # Per-system attributes can be defined here. The self' and inputs'
         # module parameters provide easy access to attributes of the same
         # system.
 
         # Equivalent to  inputs'.nixpkgs.legacyPackages.hello;
         packages.default = pkgs.hello;
-        packages.espresso = pkgs.stdenv.mkDerivation rec {
-          pname = "espresso";
-          version = "2.4";
-          nativeBuildInputs = [pkgs.cmake];
-          env.NIX_CFLAGS_COMPILE = "-std=c99";
-          doCheck = true;
-          outputs = [
-            "out"
-            "man"
-          ];
-          passthru.updateScript = pkgs.nix-update-script {};
-          src = pkgs.fetchFromGitHub {
-            owner = "chipsalliance";
-            repo = "espresso";
-            rev = "v${version}";
-            sha256 = "sha256-z5By57VbmIt4sgRgvECnLbZklnDDWUA6fyvWVyXUzsI=";
-          };
-        };
 
         devshells.default = {
           name = "ansercore-devshell";
@@ -70,7 +59,7 @@
 
             # Chisel & Scala Toolchain
             pkgs.circt
-            packages.espresso
+            pkgs.espresso
             (pkgs.mill.override {jre = pkgs.temurin-jre-bin-17;})
             pkgs.metals
             pkgs.scalafmt
