@@ -11,3 +11,5 @@ docs/html
 .bsp
 .metals
 .mill
+
+compile_commands.json
