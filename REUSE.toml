@@ -23,6 +23,7 @@ path = [
     ".scalafix.conf",
     ".scalafmt.conf",
     "docs/requirements.txt",
+    "build.mill",
     "flake.lock",
 ]
 SPDX-FileCopyrightText = "NONE"

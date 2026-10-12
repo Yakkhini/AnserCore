@@ -3,5 +3,11 @@
 
 .pre-commit-config.yaml
 
+out
+
 docs/_build
 docs/html
+
+.bsp
+.metals
+.mill
