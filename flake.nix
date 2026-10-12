@@ -39,7 +39,7 @@
 
         # Equivalent to  inputs'.nixpkgs.legacyPackages.hello;
         packages.default = pkgs.hello;
-        packages.x86_64-linux.espresso = pkgs.stdenv.mkDerivation rec {
+        packages.espresso = pkgs.stdenv.mkDerivation rec {
           pname = "espresso";
           version = "2.4";
           nativeBuildInputs = [pkgs.cmake];
@@ -70,7 +70,7 @@
 
             # Chisel & Scala Toolchain
             pkgs.circt
-            packages.x86_64-linux.espresso
+            packages.espresso
             (pkgs.mill.override {jre = pkgs.temurin-jre-bin-17;})
             pkgs.metals
             pkgs.scalafmt
