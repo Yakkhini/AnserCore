@@ -10,7 +10,7 @@ AnserCore is a RISC-V architecture processor core designed by ECOS Team, with Ou
 
 All source code in this repository is licensed under Mulan PSL v2.
 
-All documentation content is licensed under `CC BY-SA 4.0 <https://creativecommons.org/licenses/by-sa/4.0/>`_.
+All documentation content is licensed under `CC BY 4.0 <https://creativecommons.org/licenses/by/4.0/>`_.
 
 .. toctree::
    :maxdepth: 2
