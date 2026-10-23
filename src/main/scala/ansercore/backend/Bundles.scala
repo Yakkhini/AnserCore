@@ -11,6 +11,17 @@ import chisel3.util._
 object Bundles {
   private def widthFor(size: Int): Int = math.max(1, log2Ceil(size))
 
+  /** Fetch-side exception bitmap carried from the frontend to decode.
+    *
+    * 只包含前端能够观测到的取指异常；译码器在 `AnsDecodeExceptionBits` 中把它们映射到统一的异常位图。
+    */
+  object FetchExceptionBits {
+    val misaligned  = 0
+    val accessFault = 1
+    val pageFault   = 2
+    val width       = 3
+  }
+
   /** Width and capacity choices used by the bundles.
     *
     * 这些参数决定 bundle 的硬件形状，而不仅仅是软件侧的默认值。 These parameters define hardware widths and capacities, not software defaults.
@@ -29,6 +40,10 @@ object Bundles {
     numSrc:              Int = 3,
     /** Instructions grouped in one frontend block / 一个前端 block 中的指令数量. */
     fetchWidth:          Int = 4,
+    /** Fetch slots per FTQ entry; default matches 4 lanes with two halfword slots per lane. */
+    predictWidth:        Int = 8,
+    /** Number of entries in the fetch target queue / 取指目标队列深度. */
+    ftqEntries:          Int = 64,
     /** Logical register index width / 逻辑寄存器编号位宽. */
     logicalRegWidth:     Int = 5,
     /** Physical register index width after rename / 重命名后物理寄存器编号位宽. */
@@ -37,8 +52,6 @@ object Bundles {
     robIndexWidth:       Int = 8,
     /** Issue-queue and memory-queue index width / 发射队列和访存队列索引位宽. */
     queueIndexWidth:     Int = 8,
-    /** Frontend sequence width / 前端顺序号位宽. */
-    sequenceWidth:       Int = 16,
     /** Number of independently represented exception bits / 异常位图中的异常数量. */
     exceptionBits:       Int = 16,
     /** Rename width used to encode instruction size metadata / 重命名宽度对应的指令尺寸编码. */
@@ -59,9 +72,11 @@ object Bundles {
     require(instructionWidth > 0, "instructionWidth must be positive")
     require(numSrc > 0, "numSrc must be positive")
     require(fetchWidth > 0, "fetchWidth must be positive")
+    require(predictWidth >= fetchWidth, "predictWidth must cover at least one slot per fetch lane")
+    require(ftqEntries > 1, "ftqEntries must be greater than one")
     require(logicalRegWidth > 0 && physicalRegWidth > 0, "register widths must be positive")
     require(robIndexWidth > 0 && queueIndexWidth > 0, "queue widths must be positive")
-    require(sequenceWidth > 0 && exceptionBits > 0, "sequence and exception widths must be positive")
+    require(exceptionBits > 0, "exception width must be positive")
     require(renameWidth > 0, "rename capacity must be positive")
     require(
       loadPipelineWidth > 0 && loadDependencyWidth >= 2,
@@ -69,6 +84,47 @@ object Bundles {
     )
     require(maxLatency > 0, "maximum latency must be positive")
     require(maxExuCount > 0 && maxWakeupCopies >= 0, "execution-unit parameters are invalid")
+
+    /** Width of the FTQ pointer value field. */
+    def ftqPtrWidth: Int = widthFor(ftqEntries)
+
+    /** Width of the FTQ entry offset field. */
+    def ftqOffsetWidth: Int = widthFor(predictWidth)
+  }
+
+  /** Circular pointer into the fetch target queue.
+    *
+    * `flag` distinguishes the two halves of the circular queue, so age comparisons remain correct across wrap-around.
+    * 与香山一致：`flag` 用于区分环形队列的两个半区，跨回绕比较不能退化成裸 `UInt >`。
+    */
+  class FtqPtr(val params: BundleParams = BundleParams()) extends Bundle {
+    val flag  = Bool()
+    val value = UInt(params.ftqPtrWidth.W)
+
+    def ===(that: FtqPtr): Bool = this.asUInt === that.asUInt
+
+    def =/=(that: FtqPtr): Bool = this.asUInt =/= that.asUInt
+
+    def >(that: FtqPtr): Bool = (flag ^ that.flag) ^ (value > that.value)
+
+    def <(that: FtqPtr): Bool = (flag ^ that.flag) ^ (value < that.value)
+
+    def isAfter(that: FtqPtr): Bool = this > that
+
+    def isBefore(that: FtqPtr): Bool = this < that
+  }
+
+  object FtqPtr {
+    def apply(
+      flag:   Bool,
+      value:  UInt,
+      params: BundleParams = BundleParams(),
+    ): FtqPtr = {
+      val ptr = Wire(new FtqPtr(params))
+      ptr.flag  := flag
+      ptr.value := value
+      ptr
+    }
   }
 
   /** Static properties of one execution unit.
@@ -699,7 +755,59 @@ object Bundles {
     val j     = 5
     val z     = 6
 
+    /** FLI encodes a five-bit floating-point constant index in the rs1 field. */
+    val fli = 7
+
     def apply(): UInt = UInt(width.W)
+  }
+
+  /** Immediate payload carried by the pipeline.
+    *
+    * Decode stores only the bits encoded in the instruction; sign or zero extension to XLEN happens at the execution
+    * side. B/J drop their implicit zero LSB and U keeps 20 bits without the 12-bit shift, so the packed field is
+    * `width` bits instead of XLEN. 立即数在流水线中只保留编码位段，扩展由执行端完成。
+    */
+  object ImmPacking {
+    val width = 20
+
+    /** Extract the immediate payload selected by `immType` from a 32-bit instruction. */
+    def pack(instr: UInt, immType: UInt): UInt =
+      MuxLookup(immType, 0.U(width.W))(
+        Seq(
+          ImmType.i.U(ImmType.width.W)   -> instr(31, 20),
+          ImmType.s.U(ImmType.width.W)   -> Cat(instr(31, 25), instr(11, 7)),
+          ImmType.b.U(ImmType.width.W)   -> Cat(instr(31), instr(7), instr(30, 25), instr(11, 8)),
+          ImmType.u.U(ImmType.width.W)   -> instr(31, 12),
+          ImmType.j.U(ImmType.width.W)   -> Cat(instr(31), instr(19, 12), instr(20), instr(30, 21)),
+          ImmType.z.U(ImmType.width.W)   -> instr(31, 20),
+          ImmType.fli.U(ImmType.width.W) -> instr(19, 15),
+        )
+      )
+
+    /** Expand a packed immediate to XLEN using its encoding type. */
+    def extend(packed: UInt, immType: UInt, xlen: Int): UInt = {
+      require(xlen >= 32, "packed immediates are defined for XLEN >= 32")
+
+      def signed(value: UInt, valueWidth: Int): UInt =
+        if (valueWidth >= xlen) value
+        else Cat(Fill(xlen - valueWidth, value(valueWidth - 1)), value)
+
+      def unsigned(value: UInt, valueWidth: Int): UInt =
+        if (valueWidth >= xlen) value
+        else Cat(0.U((xlen - valueWidth).W), value)
+
+      MuxLookup(immType, 0.U(xlen.W))(
+        Seq(
+          ImmType.i.U(ImmType.width.W)   -> signed(packed(11, 0), 12),
+          ImmType.s.U(ImmType.width.W)   -> signed(packed(11, 0), 12),
+          ImmType.b.U(ImmType.width.W)   -> signed(Cat(packed(11, 0), 0.U(1.W)), 13),
+          ImmType.u.U(ImmType.width.W)   -> signed(Cat(packed(19, 0), 0.U(12.W)), 32),
+          ImmType.j.U(ImmType.width.W)   -> signed(Cat(packed(19, 0), 0.U(1.W)), 21),
+          ImmType.z.U(ImmType.width.W)   -> unsigned(packed(11, 0), 12),
+          ImmType.fli.U(ImmType.width.W) -> unsigned(packed(4, 0), 5),
+        )
+      )
+    }
   }
 
   object CommitType {
@@ -744,26 +852,28 @@ object Bundles {
     * RVB23 只规定指令的架构语义；预测信息和前端身份标签属于乱序实现所需的微架构状态。
     */
   class StaticInst(val params: BundleParams = BundleParams()) extends Bundle {
+
     /** 前端提供的原始指令编码；压缩指令使用低 16 bit，译码器负责展开。 */
     val instr = UInt(params.instructionWidth.W)
+
     /** 当前指令的 PC，用于控制流目标、异常现场和提交端精确状态。 */
     val pc = UInt(params.pcWidth.W)
 
-    /** 前端已识别的异常位图；译码器会在其上追加非法指令和取指故障位。 */
-    val exceptionBits      = UInt(params.exceptionBits.W)
-    /** 取指访问故障汇总信号；仅存在于前端边界，译码后折叠进 `exceptionBits`。 */
-    val fetchFault         = Bool()
-    /** 前端预测的跳转方向，执行阶段据此判断方向预测是否错误。 */
-    val predictedTaken     = Bool()
-    /** 当前指令是否为本取指块末条，用于阻止 ROB 压缩跨越前端块边界。 */
-    val isLastInFetchBlock = Bool()
-    /** 前端取指块顺序号；与 `fetchSlot` 一起提供流水线中的稳定指令身份。 */
-    val sequence           = UInt(params.sequenceWidth.W)
-    /** 指令在当前取指块内的位置。 */
-    val fetchSlot          = UInt(widthFor(params.fetchWidth).W)
+    /** 前端已识别的取指异常位图；译码器会把它映射到统一异常位图并追加非法指令位。 */
+    val exceptionBits = UInt(FetchExceptionBits.width.W)
 
-    def connectFrom(source: StaticInst): Unit =
-      this := source
+    /** 前端预测的跳转方向，执行阶段据此判断方向预测是否错误。 */
+    val predictedTaken = Bool()
+
+    /** FTQ entry pointer; with `ftqOffset` it identifies the instruction across the frontend pipeline. */
+    val ftqPtr = new FtqPtr(params)
+
+    /** Slot within the FTQ entry; two halfword slots per lane when RVC is enabled. */
+    val ftqOffset = UInt(params.ftqOffsetWidth.W)
+
+    /** 当前指令是否为该 FTQ entry 中最后一条有效指令，用于阻止融合/ROB 压缩跨块。 */
+    val isLastInFtqEntry = Bool()
+
   }
 
   /** Decode output before register renaming / 重命名前的译码结果.
@@ -771,64 +881,81 @@ object Bundles {
     * 这里只保留标量 RVB23 和乱序后端需要的信息；不包含向量、虚拟化、SSIT/WaitTable 或调试单步状态。
     */
   class DecodedInst(val params: BundleParams = BundleParams()) extends Bundle {
+
     /** 原始指令编码，用于异常报告、调试和提交端指令识别。 */
-    val instr              = UInt(params.instructionWidth.W)
+    val instr = UInt(params.instructionWidth.W)
+
     /** 指令 PC。 */
-    val pc                 = UInt(params.pcWidth.W)
+    val pc = UInt(params.pcWidth.W)
+
     /** 统一异常位图，包含前端异常、取指故障和非法指令。 */
-    val exceptionBits      = UInt(params.exceptionBits.W)
+    val exceptionBits = UInt(params.exceptionBits.W)
+
     /** 前端预测方向。 */
-    val predictedTaken     = Bool()
-    /** 取指块末条标志，ROB 压缩不能跨越该边界。 */
-    val isLastInFetchBlock = Bool()
-    /** 前端取指块顺序号。 */
-    val sequence           = UInt(params.sequenceWidth.W)
-    /** 指令在取指块内的位置。 */
-    val fetchSlot          = UInt(widthFor(params.fetchWidth).W)
+    val predictedTaken = Bool()
+
+    /** FTQ entry pointer; with `ftqOffset` it identifies the instruction across the frontend pipeline. */
+    val ftqPtr = new FtqPtr(params)
+
+    /** Slot within the FTQ entry; two halfword slots per lane when RVC is enabled. */
+    val ftqOffset = UInt(params.ftqOffsetWidth.W)
+
+    /** 该 FTQ entry 的末条标志，融合和 ROB 压缩不能跨越该边界。 */
+    val isLastInFtqEntry = Bool()
 
     /** 每个源槽的类别：整数寄存器、浮点寄存器、立即数或无源。 */
-    val srcType     = Vec(params.numSrc, SrcType())
+    val srcType = Vec(params.numSrc, SrcType())
+
     /** 译码得到的逻辑源寄存器号；重命名后转换为 `psrc`。 */
-    val logicalSrc  = Vec(params.numSrc, UInt(params.logicalRegWidth.W))
+    val logicalSrc = Vec(params.numSrc, UInt(params.logicalRegWidth.W))
+
     /** 逻辑目的寄存器号。 */
     val logicalDest = UInt(params.logicalRegWidth.W)
 
     /** 功能单元类别；与 `fuOpType` 共同唯一确定标量运算。 */
-    val fuType   = FuType()
+    val fuType = FuType()
+
     /** 功能单元内部操作码，其含义由 `fuType` 解释。 */
     val fuOpType = FuOpType()
+
     /** 指令是否写整数寄存器堆。 */
-    val intWen   = Bool()
+    val intWen = Bool()
+
     /** 指令是否写浮点寄存器堆。 */
-    val fpWen    = Bool()
+    val fpWen = Bool()
 
     /** 必须等待更老指令先向前推进，适用于部分 CSR/内存序指令。 */
-    val waitForward     = Bool()
+    val waitForward = Bool()
+
     /** 阻止更年轻指令越过当前指令。 */
-    val blockBackward   = Bool()
+    val blockBackward = Bool()
+
     /** 指令提交时必须刷新自身之后的流水线状态。 */
     val commitSelfFlush = Bool()
+
     /** 指令允许与相邻简单指令共享 ROB 条目。 */
-    val canRobCompress  = Bool()
+    val canRobCompress = Bool()
 
     /** 立即数字段的编码类型，供融合和执行输入选择使用。 */
-    val immType           = ImmType()
-    /** 已按 XLEN 扩展的立即数。 */
-    val imm               = UInt(params.xlen.W)
+    val immType = ImmType()
+
+    /** 打包后的立即数；执行端用 `ImmPacking.extend` 扩展到 XLEN。 */
+    val imm = UInt(ImmPacking.width.W)
+
     /** 可由重命名阶段消除的整数寄存器 move。 */
-    val isMove            = Bool()
+    val isMove = Bool()
+
     /** ROB/提交端使用的指令类别。 */
-    val commitType        = CommitType()
+    val commitType = CommitType()
+
     /** 浮点运算是否需要读取动态舍入模式。 */
     val needsRoundingMode = Bool()
+
     /** 指令编码中的浮点舍入模式；仅在 `needsRoundingMode` 时参与合法性和执行。 */
-    val rm                = UInt(3.W)
+    val rm = UInt(3.W)
 
-    /** 是否已经携带异常。异常状态只存一份，避免 `isTrap`/`fetchFault` 与位图不一致。 */
+    /** 是否已经携带异常。异常状态只存一份，避免额外状态与位图不一致。 */
     def hasException: Bool = exceptionBits.orR
-
-    def connectFrom(source: StaticInst): Unit =
-      connectSamePort(this, source)
   }
 
   /** Shared scalar fusion source-selection metadata. */
@@ -842,25 +969,22 @@ object Bundles {
   class TrapInstInfo(val params: BundleParams = BundleParams()) extends Bundle {
     val instr     = UInt(params.instructionWidth.W)
     val pc        = UInt(params.pcWidth.W)
-    val sequence  = UInt(params.sequenceWidth.W)
-    val fetchSlot = UInt(widthFor(params.fetchWidth).W)
+    val ftqPtr    = new FtqPtr(params)
+    val ftqOffset = UInt(params.ftqOffsetWidth.W)
 
-    /** Compare two instructions in the same non-wrapping sequence window.
-      *
-      * 该比较假定两个序号位于同一个不跨回绕的窗口内；跨窗口比较应由 ROB 提供专门的年龄判断，不能直接复用这个方法。
-      */
-    def needFlush(currentSequence: UInt, currentSlot: UInt): Bool =
-      (sequence > currentSequence) ||
-        ((sequence === currentSequence) && (fetchSlot > currentSlot))
+    /** Compare two instructions in FTQ order using wrap-aware pointer age. */
+    def needFlush(currentFtqPtr: FtqPtr, currentFtqOffset: UInt): Bool =
+      (ftqPtr === currentFtqPtr && ftqOffset > currentFtqOffset) ||
+        ftqPtr.isAfter(currentFtqPtr)
 
-    def sameInst(currentSequence: UInt, currentSlot: UInt): Bool =
-      (sequence === currentSequence) && (fetchSlot === currentSlot)
+    def sameInst(currentFtqPtr: FtqPtr, currentFtqOffset: UInt): Bool =
+      (ftqPtr === currentFtqPtr) && (ftqOffset === currentFtqOffset)
 
     def fromDecodedInst(decodedInst: DecodedInst): Unit = {
       instr     := decodedInst.instr
       pc        := decodedInst.pc
-      sequence  := decodedInst.sequence
-      fetchSlot := decodedInst.fetchSlot
+      ftqPtr    := decodedInst.ftqPtr
+      ftqOffset := decodedInst.ftqOffset
     }
   }
 
@@ -869,77 +993,105 @@ object Bundles {
     * 这些字段中只有指令、寄存器和异常语义由 RVB23 直接约束；ROB、LSQ、预测、依赖和快照字段是实现精确异常与乱序执行所必需的状态。
     */
   class DynInst(val params: BundleParams = BundleParams()) extends Bundle {
+
     /** 原始指令编码。 */
-    val instr              = UInt(params.instructionWidth.W)
+    val instr = UInt(params.instructionWidth.W)
+
     /** 指令 PC。 */
-    val pc                 = UInt(params.pcWidth.W)
+    val pc = UInt(params.pcWidth.W)
+
     /** 统一异常位图；非零时该指令不能产生正常架构写回。 */
-    val exceptionBits      = UInt(params.exceptionBits.W)
+    val exceptionBits = UInt(params.exceptionBits.W)
+
     /** 前端预测方向，供控制流执行单元检查误预测。 */
-    val predictedTaken     = Bool()
-    /** 前端取指块顺序号；用于异常、重定向和流水线追踪。 */
-    val sequence           = UInt(params.sequenceWidth.W)
-    /** 指令在取指块内的位置；与 `sequence` 共同唯一标识前端指令。 */
-    val fetchSlot          = UInt(widthFor(params.fetchWidth).W)
+    val predictedTaken = Bool()
+
+    /** FTQ entry pointer; with `ftqOffset` it identifies the instruction after rename. */
+    val ftqPtr = new FtqPtr(params)
+
+    /** Slot within the FTQ entry. */
+    val ftqOffset = UInt(params.ftqOffsetWidth.W)
 
     /** 重命名后仍需保留的源类别，用于选择寄存器堆和唤醒域。 */
-    val srcType           = Vec(params.numSrc, SrcType())
+    val srcType = Vec(params.numSrc, SrcType())
+
     /** 逻辑目的寄存器，用于提交或重定向后的映射恢复。 */
-    val logicalDest       = UInt(params.logicalRegWidth.W)
+    val logicalDest = UInt(params.logicalRegWidth.W)
+
     /** 功能单元类别。 */
-    val fuType            = FuType()
+    val fuType = FuType()
+
     /** 功能单元内部操作码。 */
-    val fuOpType          = FuOpType()
+    val fuOpType = FuOpType()
+
     /** 整数寄存器写使能。 */
-    val intWen            = Bool()
+    val intWen = Bool()
+
     /** 浮点寄存器写使能。 */
-    val fpWen             = Bool()
+    val fpWen = Bool()
+
     /** 等待更老指令向前推进。 */
-    val waitForward       = Bool()
+    val waitForward = Bool()
+
     /** 阻止更年轻指令越过。 */
-    val blockBackward     = Bool()
+    val blockBackward = Bool()
+
     /** 提交时刷新后续流水线。 */
-    val commitSelfFlush   = Bool()
+    val commitSelfFlush = Bool()
+
     /** 立即数类型。 */
-    val immType           = ImmType()
-    /** XLEN 宽立即数。 */
-    val imm               = UInt(params.xlen.W)
+    val immType = ImmType()
+
+    /** 打包立即数；送执行端后再扩展。 */
+    val imm = UInt(ImmPacking.width.W)
+
     /** 译码识别且满足消除条件的 move。 */
-    val isMove            = Bool()
+    val isMove = Bool()
+
     /** 提交类别。 */
-    val commitType        = CommitType()
+    val commitType = CommitType()
+
     /** 是否读取浮点动态舍入模式。 */
     val needsRoundingMode = Bool()
+
     /** 译码阶段保留下来的浮点舍入模式。 */
-    val rm                = UInt(3.W)
+    val rm = UInt(3.W)
 
     /** 每个物理源操作数在进入分派时的就绪状态。 */
-    val srcState          = Vec(params.numSrc, SourceState())
+    val srcState = Vec(params.numSrc, SourceState())
+
     /** 推测 load 唤醒依赖，用于 load 取消后的选择性回滚；它不属于 SSIT/WaitTable。 */
     val srcLoadDependency = Vec(
       params.numSrc,
       Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W)),
     )
+
     /** 重命名后的物理源寄存器号。 */
-    val psrc              = Vec(params.numSrc, UInt(params.physicalRegWidth.W))
+    val psrc = Vec(params.numSrc, UInt(params.physicalRegWidth.W))
+
     /** 新分配或 move 消除复用的物理目的寄存器号。 */
-    val pdest             = UInt(params.physicalRegWidth.W)
+    val pdest = UInt(params.physicalRegWidth.W)
 
     /** 指令所属的 ROB 条目。 */
-    val robIdx    = UInt(params.robIndexWidth.W)
+    val robIdx = UInt(params.robIndexWidth.W)
+
     /** 当前压缩 ROB 组包含的指令数，不是 16/32-bit 指令字节数。 */
     val instrSize = UInt(widthFor(params.renameWidth + 1).W)
+
     /** Load Queue 条目号，由分派/LSQ 分配。 */
-    val lqIdx     = UInt(params.queueIndexWidth.W)
+    val lqIdx = UInt(params.queueIndexWidth.W)
+
     /** Store Queue 条目号，由分派/LSQ 分配。 */
-    val sqIdx     = UInt(params.queueIndexWidth.W)
+    val sqIdx = UInt(params.queueIndexWidth.W)
 
     /** 当前 move 是否已通过复用物理源寄存器完成消除。 */
     val eliminatedMove = Bool()
+
     /** 当前指令是否触发一份重命名恢复快照。 */
-    val snapshot       = Bool()
+    val snapshot = Bool()
+
     /** 指令是否因执行条件变化而需要重新发射。 */
-    val replayInst     = Bool()
+    val replayInst = Bool()
 
     /** 是否已经携带异常；由异常位图组合产生，不额外保存一份状态。 */
     def hasException: Bool = exceptionBits.orR
@@ -1145,7 +1297,7 @@ object Bundles {
   }
 
   class ImmInfo(val params: BundleParams = BundleParams()) extends Bundle {
-    val imm     = UInt(params.xlen.W)
+    val imm     = UInt(ImmPacking.width.W)
     val immType = ImmType()
   }
 
@@ -1174,12 +1326,14 @@ object Bundles {
     require(copyNum >= 0, "copyNum must be non-negative")
     require(copyNum <= params.maxWakeupCopies, "copyNum exceeds configured wakeup capacity")
 
-    val fuType       = FuType()
-    val fuOpType     = FuOpType()
-    val immType      = ImmType()
-    val srcType      = Vec(exuParams.numRegSrc, SrcType())
-    val src          = Vec(exuParams.numRegSrc, UInt(exuParams.srcDataWidth.W))
-    val imm          = UInt(params.xlen.W)
+    val fuType   = FuType()
+    val fuOpType = FuOpType()
+    val immType  = ImmType()
+    val srcType  = Vec(exuParams.numRegSrc, SrcType())
+    val src      = Vec(exuParams.numRegSrc, UInt(exuParams.srcDataWidth.W))
+
+    /** Packed immediate; expand with `ImmPacking.extend` before use. */
+    val imm          = UInt(ImmPacking.width.W)
     val nextPcOffset = UInt(params.pcWidth.W)
     val robIdx       = UInt(params.robIndexWidth.W)
     val iqIdx        = UInt(params.queueIndexWidth.W)
@@ -1198,8 +1352,8 @@ object Bundles {
     val needsRoundingMode = Bool()
     val commitSelfFlush   = Bool()
     val pc                = UInt(params.pcWidth.W)
-    val fetchBlockId      = UInt(params.sequenceWidth.W)
-    val fetchOffset       = UInt(widthFor(params.fetchWidth).W)
+    val ftqPtr            = new FtqPtr(params)
+    val ftqOffset         = UInt(params.ftqOffsetWidth.W)
 
     val predictTarget = UInt(params.pcWidth.W)
     val predictTaken  = Bool()
@@ -1207,8 +1361,8 @@ object Bundles {
 
     // LSQ indices remain part of the scalar memory pipeline. SSIT/WaitTable
     // prediction fields are intentionally absent until that predictor exists.
-    val lqIdx          = UInt(params.queueIndexWidth.W)
-    val sqIdx          = UInt(params.queueIndexWidth.W)
+    val lqIdx = UInt(params.queueIndexWidth.W)
+    val sqIdx = UInt(params.queueIndexWidth.W)
 
     val dataSources    = Vec(exuParams.numRegSrc, DataSource())
     val exuSources     = Vec(
@@ -1220,7 +1374,6 @@ object Bundles {
       params.loadPipelineWidth,
       UInt(params.loadDependencyWidth.W),
     )
-    val sequence       = UInt(params.sequenceWidth.W)
 
     def fromIssueBundle(source: IssueQueueIssueBundle): Unit = {
       connectSamePort(this, source.common)
@@ -1270,7 +1423,7 @@ object Bundles {
     val replayInst      = Bool()
     val lqIdx           = UInt(params.queueIndexWidth.W)
     val sqIdx           = UInt(params.queueIndexWidth.W)
-    val sequence        = UInt(params.sequenceWidth.W)
+    val ftqPtr          = new FtqPtr(params)
   }
 
   /** Register-file write port / 寄存器堆写端口. */
@@ -1312,7 +1465,7 @@ object Bundles {
     val writeFpFlags    = Bool()
     val exceptionBits   = UInt(params.exceptionBits.W)
     val hasException    = Bool()
-    val sequence        = UInt(params.sequenceWidth.W)
+    val ftqPtr          = new FtqPtr(params)
 
     def fromExuOutput(source: ExuOutput): Unit = {
       intWen          := source.intWen
@@ -1327,7 +1480,7 @@ object Bundles {
       writeFpFlags    := source.writeFpFlags
       exceptionBits   := source.exceptionBits
       hasException    := source.hasException
-      sequence        := source.sequence
+      ftqPtr          := source.ftqPtr
     }
 
     def asIntRfWriteBundle(fire: Bool): RegisterWriteBundle = {

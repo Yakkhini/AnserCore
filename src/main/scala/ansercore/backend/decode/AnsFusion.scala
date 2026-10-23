@@ -209,8 +209,8 @@ class AnsFusionDecoder(val params: BundleParams = BundleParams()) extends Module
     val pairValid    = pair.map(_.valid).reduce(_ && _)
     val pairSafe     = !pair(0).bits.hasException &&
       !pair(1).bits.hasException &&
-      !pair(0).bits.isLastInFetchBlock &&
-      pair(0).bits.sequence === pair(1).bits.sequence
+      !pair(0).bits.isLastInFtqEntry &&
+      pair(0).bits.ftqPtr === pair(1).bits.ftqPtr
     val pairEligible = pairValid && pairSafe
     val hit          = VecInit(rules.map(_.isValid))
     val hitReg       = RegInit(VecInit(Seq.fill(rules.size)(false.B)))

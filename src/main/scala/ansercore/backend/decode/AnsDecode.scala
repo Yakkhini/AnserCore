@@ -17,7 +17,17 @@ import chisel3._
 import chisel3.util._
 
 import ansercore.backend.Bundles._
-import ansercore.backend.Bundles.{BundleParams, CommitType, DecodedInst, FuOpType, FuType, ImmType, SrcType, StaticInst}
+import ansercore.backend.Bundles.{
+  BundleParams,
+  CommitType,
+  DecodedInst,
+  FetchExceptionBits,
+  FuOpType,
+  FuType,
+  ImmType,
+  SrcType,
+  StaticInst,
+}
 import ansercore.backend.exu.csr.AnsCsrDecodeState
 
 /* 位模式构造小工具。
@@ -38,10 +48,23 @@ object AnsBits {
   def boolPat(value: Boolean): BitPat = if (value) BitPat("b1") else BitPat("b0")
 }
 
-/* 非法指令与取指异常在 exceptionBits 中的位置（与现有 DecodeUnit 约定一致）。 */
+/* 统一异常位图（DecodedInst/DynInst.exceptionBits）中的位号。
+ *
+ * 前端只在 `StaticInst.exceptionBits` 中携带自己的取指异常，译码器按 `fetchBits` 映射到这里的
+ * 位置，从而让下游直接按位号区分 cause。
+ */
 object AnsDecodeExceptionBits {
   val illegalInstruction = 0
-  val fetchFault         = 1
+  val fetchMisaligned    = 1
+  val fetchAccessFault   = 2
+  val fetchPageFault     = 3
+
+  /** 前端取指异常位 -> 统一异常位图位. */
+  val fetchBits = Seq(
+    FetchExceptionBits.misaligned  -> fetchMisaligned,
+    FetchExceptionBits.accessFault -> fetchAccessFault,
+    FetchExceptionBits.pageFault   -> fetchPageFault,
+  )
 }
 
 /* Zfa 的 D 精度 op 与 Zicbop prefetch 已并入 Bundles 的 FALUOpType / LSUOpType。 */
@@ -58,24 +81,9 @@ trait AnsDecodeConstants {
   /* 未命中任何模式时的默认行。
    *
    * 与香山用 selImm = INVALID_INSTR 表示非法不同，这里直接把默认行的 isIllegal 置为 true：
-   * 查表未命中即非法指令，等价且更简单。
+   * 查表未命中即非法指令，等价且更简单。列值由 AnsDecodeColumns 统一派生。
    */
-  def decodeDefault: List[BitPat] = List(
-    AnsBits.constPat(SrcType.none, SrcType.width),
-    AnsBits.constPat(SrcType.none, SrcType.width),
-    AnsBits.constPat(SrcType.none, SrcType.width),
-    AnsBits.constPat(FuType.other, FuType.width),
-    FuOpType.X,
-    AnsBits.boolPat(false),                       // intWen
-    AnsBits.boolPat(false),                       // fpWen
-    AnsBits.boolPat(true),                        // isIllegal：默认非法
-    AnsBits.boolPat(false),                       // blockBackward
-    AnsBits.boolPat(false),                       // commitSelfFlush
-    AnsBits.boolPat(false),                       // canRobCompress
-    AnsBits.boolPat(false),                       // waitForward
-    AnsBits.boolPat(false),                       // needsRoundingMode
-    AnsBits.constPat(ImmType.none, ImmType.width), // selImm
-  )
+  def decodeDefault: List[BitPat] = AnsDecodeColumns.defaults.toList
 }
 
 /* 一条标量译码表项。`generate()` 产出一行列值，顺序必须与 decodeDefault 完全一致。 */
@@ -83,69 +91,127 @@ abstract class AnsDecodeBase {
   def generate(): List[BitPat]
 }
 
-/* 标量译码行：三个源类型槽 + FU/微操作 + 各类控制位 + 立即数类型。 */
-class AnsDecode(
-  val sources:           Seq[Int],
-  val fuType:            Int,
-  val fuOpType:          BitPat,
-  val immType:           Int,
-  val intWen:            Boolean,
-  val fpWen:             Boolean,
-  val isIllegal:         Boolean,
-  val waitForward:       Boolean,
-  val blockBackward:     Boolean,
-  val commitSelfFlush:   Boolean,
-  val canRobCompress:    Boolean,
-  val needsRoundingMode: Boolean,
+/* 标量译码行：三个源类型槽 + FU/微操作 + 各类控制位 + 立即数类型。
+ *
+ * 列值由 AnsDecodeColumns 统一派生，增删列时不再需要手工同步 generate/default/widths。
+ */
+final case class AnsDecode(
+  sources:           Seq[Int] = Seq(SrcType.none, SrcType.none, SrcType.none),
+  fuType:            Int      = FuType.other,
+  fuOpType:          BitPat   = FuOpType.X,
+  immType:           Int      = ImmType.none,
+  intWen:            Boolean  = false,
+  fpWen:             Boolean  = false,
+  isIllegal:         Boolean  = false,
+  waitForward:       Boolean  = false,
+  blockBackward:     Boolean  = false,
+  commitSelfFlush:   Boolean  = false,
+  canRobCompress:    Boolean  = false,
+  needsRoundingMode: Boolean  = false,
 ) extends AnsDecodeBase {
   require(sources.length == 3, "scalar decode entries must describe three source slots")
 
-  def generate(): List[BitPat] = List(
-    AnsBits.constPat(sources(0), SrcType.width),
-    AnsBits.constPat(sources(1), SrcType.width),
-    AnsBits.constPat(sources(2), SrcType.width),
-    AnsBits.constPat(fuType, FuType.width),
-    fuOpType,
-    AnsBits.boolPat(intWen),
-    AnsBits.boolPat(fpWen),
-    AnsBits.boolPat(isIllegal),
-    AnsBits.boolPat(blockBackward),
-    AnsBits.boolPat(commitSelfFlush),
-    AnsBits.boolPat(canRobCompress),
-    AnsBits.boolPat(waitForward),
-    AnsBits.boolPat(needsRoundingMode),
-    AnsBits.constPat(immType, ImmType.width),
-  )
+  def generate(): List[BitPat] = AnsDecodeColumns.all.map(_.encode(this)).toList
 }
 
 object AnsDecode {
-  def apply(
-    sources:           Seq[Int],
-    fuType:            Int,
-    fuOpType:          UInt,
-    immType:           Int     = ImmType.none,
-    intWen:            Boolean = false,
-    fpWen:             Boolean = false,
-    isIllegal:         Boolean = false,
-    waitForward:       Boolean = false,
-    blockBackward:     Boolean = false,
-    commitSelfFlush:   Boolean = false,
-    canRobCompress:    Boolean = false,
-    needsRoundingMode: Boolean = false,
-  ): AnsDecode = new AnsDecode(
-    sources,
-    fuType,
-    BitPat(fuOpType),
-    immType,
-    intWen,
-    fpWen,
-    isIllegal,
-    waitForward,
-    blockBackward,
-    commitSelfFlush,
-    canRobCompress,
-    needsRoundingMode,
+
+  /** Convenience for tables that naturally carry the opcode as a UInt literal. */
+  def fromUInt(
+    sources:                     Seq[Int],
+    fuType:                      Int,
+    fuOpType:                    UInt,
+    immType:                     Int,
+    intWen:                      Boolean,
+    fpWen:                       Boolean,
+    isIllegal:                   Boolean,
+    waitForward:                 Boolean,
+    blockBackward:               Boolean,
+    commitSelfFlush:             Boolean,
+    canRobCompress:              Boolean,
+    needsRoundingMode:           Boolean,
+  ): AnsDecode = AnsDecode(
+    sources           = sources,
+    fuType            = fuType,
+    fuOpType          = BitPat(fuOpType),
+    immType           = immType,
+    intWen            = intWen,
+    fpWen             = fpWen,
+    isIllegal         = isIllegal,
+    waitForward       = waitForward,
+    blockBackward     = blockBackward,
+    commitSelfFlush   = commitSelfFlush,
+    canRobCompress    = canRobCompress,
+    needsRoundingMode = needsRoundingMode,
   )
+}
+
+/* 一列译码结果。`encode` 在 elaboration 阶段把行数据变成该列的 BitPat。 */
+sealed trait AnsColumn {
+  def name:                   String
+  def width:                  Int
+  def default:                BitPat
+  def encode(row: AnsDecode): BitPat
+}
+
+object AnsColumn {
+  final case class Bool(
+    name:         String,
+    defaultValue: Boolean,
+    get:          AnsDecode => Boolean,
+  ) extends AnsColumn {
+    val width                          = 1
+    def default: BitPat                = AnsBits.boolPat(defaultValue)
+    def encode(row: AnsDecode): BitPat = AnsBits.boolPat(get(row))
+  }
+
+  final case class Enum(
+    name:         String,
+    width:        Int,
+    defaultValue: Int,
+    get:          AnsDecode => Int,
+  ) extends AnsColumn {
+    def default: BitPat                = AnsBits.constPat(defaultValue, width)
+    def encode(row: AnsDecode): BitPat = AnsBits.constPat(get(row), width)
+  }
+
+  final case class Raw(
+    name:    String,
+    width:   Int,
+    default: BitPat,
+    get:     AnsDecode => BitPat,
+  ) extends AnsColumn {
+    def encode(row: AnsDecode): BitPat = get(row)
+  }
+}
+
+/* 译码表的列契约：generate/default/columnWidths/字段抽取都由这一份定义派生。 */
+object AnsDecodeColumns {
+  import AnsColumn._
+
+  val all: Seq[AnsColumn] = Seq(
+    Enum("src0", SrcType.width, SrcType.none, _.sources(0)),
+    Enum("src1", SrcType.width, SrcType.none, _.sources(1)),
+    Enum("src2", SrcType.width, SrcType.none, _.sources(2)),
+    Enum("fuType", FuType.width, FuType.other, _.fuType),
+    Raw("fuOpType", FuOpType.width, FuOpType.X, _.fuOpType),
+    Bool("intWen", false, _.intWen),
+    Bool("fpWen", false, _.fpWen),
+    Bool("isIllegal", true, _.isIllegal),
+    Bool("blockBackward", false, _.blockBackward),
+    Bool("commitSelfFlush", false, _.commitSelfFlush),
+    Bool("canRobCompress", false, _.canRobCompress),
+    Bool("waitForward", false, _.waitForward),
+    Bool("needsRoundingMode", false, _.needsRoundingMode),
+    Enum("immType", ImmType.width, ImmType.none, _.immType),
+  )
+
+  val index: Map[String, Int] = all.map(_.name).zipWithIndex.toMap
+  val widths: Seq[Int]        = all.map(_.width)
+  val defaults: Seq[BitPat]   = all.map(_.default)
+
+  require(index.size == all.size, "duplicate decode column name")
+  require(widths.forall(_ > 0), "decode column width must be positive")
 }
 
 /* 常见源类型组合，供各扩展译码表复用。 */
@@ -172,7 +238,7 @@ trait AnsDecodeSources {
     commitSelfFlush:   Boolean = false,
     canRobCompress:    Boolean = false,
     needsRoundingMode: Boolean = false,
-  ): (BitPat, AnsDecodeBase) = pattern -> AnsDecode(
+  ): (BitPat, AnsDecodeBase) = pattern -> AnsDecode.fromUInt(
     sources,
     fu,
     op,
@@ -782,8 +848,8 @@ object AnsZfaDecode extends AnsDecodeConstants with AnsDecodeSources {
   import FuType.{falu, fcvt}
 
   val decodeArray: Array[(BitPat, AnsDecodeBase)] = Array(
-    entry(FLI_S, noSources, falu, FALUOpType.fliS, fpWen                 = true, canRobCompress = true),
-    entry(FLI_D, noSources, falu, FALUOpType.fliD, fpWen                 = true, canRobCompress = true),
+    entry(FLI_S, noSources, falu, FALUOpType.fliS, imm                   = ImmType.fli, fpWen   = true, canRobCompress = true),
+    entry(FLI_D, noSources, falu, FALUOpType.fliD, imm                   = ImmType.fli, fpWen   = true, canRobCompress = true),
     entry(FMINM_S, floatingBinary, falu, FALUOpType.fminmS, fpWen        = true, canRobCompress = true),
     entry(FMAXM_S, floatingBinary, falu, FALUOpType.fmaxmS, fpWen        = true, canRobCompress = true),
     entry(FMINM_D, floatingBinary, falu, FALUOpType.fminmD, fpWen        = true, canRobCompress = true),
@@ -930,6 +996,45 @@ object AnsSystemDecode extends AnsDecodeConstants with AnsDecodeSources {
     entry(MOP_R, noSources, alu, ALUOpType.mopR, intWen                              = true, canRobCompress  = true),
     entry(MOP_RR, noSources, alu, ALUOpType.mopRr, intWen                            = true, canRobCompress  = true),
   )
+}
+
+/* 标量译码表注册表与一致性检查。
+ *
+ * 顺序即优先级：Zicbop 的 ORI 外形、Zihintntl 的 ADD 别名都要求 System 先于 Int。
+ * 新增一套标量扩展时，只需在这里注册它的 decodeArray。
+ */
+object AnsDecodeTables {
+  val scalar: Seq[Array[(BitPat, AnsDecodeBase)]] = Seq(
+    AnsSystemDecode.decodeArray,
+    AnsIntDecode.decodeArray,
+    AnsFpDecode.decodeArray,
+    AnsBitmanipDecode.decodeArray,
+    AnsZfaDecode.decodeArray,
+  )
+
+  val flat: Array[(BitPat, AnsDecodeBase)] = scalar.flatten.toArray
+
+  require(flat.map(_._1).distinct.length == flat.length, "decode table contains duplicate patterns")
+
+  /** Two 32-bit patterns overlap when some concrete instruction satisfies both. */
+  def overlaps(a: BitPat, b: BitPat): Boolean =
+    a.getWidth == b.getWidth && (((a.value ^ b.value) & a.mask & b.mask) == 0)
+
+  /** Every overlapping row pair. Known hint/alias overlaps (NTL/ADD, PAUSE/FENCE, PREFETCH/ORI, ...) are intentional;
+    * the smoke test pins the first-priority winner.
+    */
+  lazy val overlappingPairs: Seq[(BitPat, BitPat)] =
+    for {
+      i <- flat.indices
+      j <- i + 1 until flat.length
+      if overlaps(flat(i)._1, flat(j)._1)
+    } yield (flat(i)._1, flat(j)._1)
+
+  // Runs once per JVM when this object is first touched (elaboration/test startup).
+  private val reportOverlaps: Unit =
+    overlappingPairs.foreach { case (a, b) =>
+      println(s"[decode] warning: overlapping patterns $a / $b")
+    }
 }
 
 /* 压缩指令展开器：16 位 RV64C 指令 -> 等价的 32 位指令。
@@ -1141,9 +1246,9 @@ class AnsRvcExpander extends Module {
 /* 译码单元 IO。 */
 class AnsDecodeUnitEnqIO(val params: BundleParams = BundleParams()) extends Bundle {
   // 前端给出的是可能尚未展开的取指指令：低 16 位在压缩时即有效指令。
-  val ctrlFlow         = Input(new StaticInst(params))
+  val ctrlFlow = Input(new StaticInst(params))
   // CSR supplies stable state predicates; address/privilege checks stay in CSR execution.
-  val fromCsr          = Input(new AnsCsrDecodeState)
+  val fromCsr  = Input(new AnsCsrDecodeState)
 }
 
 class AnsDecodeUnitDeqIO(val params: BundleParams = BundleParams()) extends Bundle {
@@ -1175,37 +1280,14 @@ class AnsDecodeUnit(val params: BundleParams = BundleParams()) extends Module {
   rvc.io.in := ctrlFlow.instr(15, 0)
   val instruction = Mux(isCompressed, rvc.io.out, ctrlFlow.instr)
 
-  val decodeTable: Array[(BitPat, AnsDecodeBase)] =
-    // Zicbop uses an ORI-shaped encoding, so its specific rows must precede
-    // the generic OP-IMM rows in AnsIntDecode.
-    AnsSystemDecode.decodeArray ++
-      AnsIntDecode.decodeArray ++
-      AnsFpDecode.decodeArray ++
-      AnsBitmanipDecode.decodeArray ++
-      AnsZfaDecode.decodeArray
+  val decodeTable: Array[(BitPat, AnsDecodeBase)] = AnsDecodeTables.flat
 
   val table: Array[(BitPat, List[BitPat])] =
     decodeTable.map { case (pat, row) => (pat, row.generate()) }
-  val default                              = AnsIntDecode.decodeDefault
-  val columnWidths: Seq[Int]               = Seq(
-    SrcType.width,
-    SrcType.width,
-    SrcType.width,
-    FuType.width,
-    FuOpType.width,
-    1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    1,
-    ImmType.width,
-  )
+  val default                              = AnsDecodeColumns.defaults.toList
+  val columnWidths: Seq[Int]               = AnsDecodeColumns.widths
   require(default.length == columnWidths.length, "decode default column count mismatch")
   require(table.forall(_._2.length == default.length), "decode table column count mismatch")
-  require(table.map(_._1).distinct.length == table.length, "decode table contains duplicate patterns")
 
   /* 列式查表：逐列做优先级 mux（rocket DecodeLogic 的等价语义，避免引入 rocket-chip 依赖）。 */
   def decodeColumns(addr: UInt): List[UInt] = {
@@ -1219,59 +1301,36 @@ class AnsDecodeUnit(val params: BundleParams = BundleParams()) extends Module {
     }.toList
   }
 
-  val cols              = decodeColumns(instruction)
-  val fuType            = cols(3)
-  val fuOpType          = cols(4)
-  val intWen            = cols(5)(0)
-  val fpWen             = cols(6)(0)
-  val rowIllegal        = cols(7)(0)
-  val blockBackward     = cols(8)(0)
-  val commitSelfFlush   = cols(9)(0)
-  val canRobCompress    = cols(10)(0)
-  val waitForward       = cols(11)(0)
-  val needsRoundingMode = cols(12)(0)
-  val immType           = cols(13)
+  val cols                       = decodeColumns(instruction)
+  def col(name:    String): UInt = cols(AnsDecodeColumns.index(name))
+  def colBit(name: String): Bool = col(name)(0)
 
-  def signExtend(value: UInt, valueWidth: Int): UInt = {
-    require(params.xlen >= valueWidth, "immediate is wider than XLEN")
-    if (params.xlen == valueWidth) value else Cat(Fill(params.xlen - valueWidth, value(valueWidth - 1)), value)
-  }
+  val fuType            = col("fuType")
+  val fuOpType          = col("fuOpType")
+  val intWen            = colBit("intWen")
+  val fpWen             = colBit("fpWen")
+  val rowIllegal        = colBit("isIllegal")
+  val blockBackward     = colBit("blockBackward")
+  val commitSelfFlush   = colBit("commitSelfFlush")
+  val canRobCompress    = colBit("canRobCompress")
+  val waitForward       = colBit("waitForward")
+  val needsRoundingMode = colBit("needsRoundingMode")
+  val immType           = col("immType")
 
-  def zeroExtend(value: UInt, valueWidth: Int): UInt = {
-    require(params.xlen >= valueWidth, "immediate is wider than XLEN")
-    if (params.xlen == valueWidth) value else Cat(0.U((params.xlen - valueWidth).W), value)
-  }
-
-  // 立即数：I/S/B/U/J 沿用标准抽取；Z 在 Decode 中表示 CSR 地址。
+  // 立即数只打包编码位段；符号/零扩展由执行端用 `ImmPacking.extend` 完成。
   // CSR zimm 保留在 logicalSrc(0)/原始 instr 中，不增加重复的流水字段。
-  val csrAddrValue = instruction(31, 20)
-  val imm          = MuxLookup(immType, 0.U(params.xlen.W))(
-    Seq(
-      ImmType.i.U(ImmType.width.W) -> signExtend(instruction(31, 20), 12),
-      ImmType.s.U(ImmType.width.W) -> signExtend(Cat(instruction(31, 25), instruction(11, 7)), 12),
-      ImmType.b.U(ImmType.width.W) -> signExtend(
-        Cat(instruction(31), instruction(7), instruction(30, 25), instruction(11, 8), 0.U(1.W)),
-        13,
-      ),
-      ImmType.u.U(ImmType.width.W) -> signExtend(Cat(instruction(31, 12), 0.U(12.W)), 32),
-      ImmType.j.U(ImmType.width.W) -> signExtend(
-        Cat(instruction(31), instruction(19, 12), instruction(20), instruction(30, 21), 0.U(1.W)),
-        21,
-      ),
-      ImmType.z.U(ImmType.width.W) -> zeroExtend(csrAddrValue, 12),
-    )
-  )
+  val imm = ImmPacking.pack(instruction, immType)
 
   val decoded = Wire(new DecodedInst(params))
   decoded := 0.U.asTypeOf(new DecodedInst(params))
 
   // 身份信息即使非法也要透传。
-  decoded.instr              := ctrlFlow.instr
-  decoded.pc                 := ctrlFlow.pc
-  decoded.predictedTaken     := ctrlFlow.predictedTaken
-  decoded.isLastInFetchBlock := ctrlFlow.isLastInFetchBlock
-  decoded.sequence           := ctrlFlow.sequence
-  decoded.fetchSlot          := ctrlFlow.fetchSlot
+  decoded.instr            := ctrlFlow.instr
+  decoded.pc               := ctrlFlow.pc
+  decoded.predictedTaken   := ctrlFlow.predictedTaken
+  decoded.ftqPtr           := ctrlFlow.ftqPtr
+  decoded.ftqOffset        := ctrlFlow.ftqOffset
+  decoded.isLastInFtqEntry := ctrlFlow.isLastInFtqEntry
 
   decoded.fuType            := fuType
   decoded.fuOpType          := fuOpType
@@ -1287,13 +1346,6 @@ class AnsDecodeUnit(val params: BundleParams = BundleParams()) extends Module {
   decoded.rm                := instruction(14, 12)
   decoded.immType           := immType
   decoded.imm               := imm
-
-  // FLI encodes a five-bit floating-point constant index in rs1. It is not a
-  // register source, but the index must still reach the floating-point unit.
-  val isFli = (AnsRiscv.FLI_S === instruction) || (AnsRiscv.FLI_D === instruction)
-  when(isFli) {
-    decoded.imm := zeroExtend(instruction(19, 15), 5)
-  }
 
   // commitType 由 fuType 派生（不占表列）。
   decoded.commitType := MuxCase(
@@ -1316,11 +1368,14 @@ class AnsDecodeUnit(val params: BundleParams = BundleParams()) extends Module {
     decoded.logicalSrc(slot) := 0.U
   }
   decoded.logicalDest   := instruction(11, 7)
-  for (slot <- 0 until params.numSrc) {
-    decoded.srcType(slot) := cols(slot)
+  for (slot <- 0 until 3) {
+    decoded.srcType(slot) := col(s"src$slot")
+  }
+  for (slot <- 3 until params.numSrc) {
+    decoded.srcType(slot) := 0.U
   }
 
-  val usesFloatingState = fpWen || cols.take(3).map(SrcType.isFloating).reduce(_ || _)
+  val usesFloatingState = fpWen || (0 until 3).map(slot => SrcType.isFloating(col(s"src$slot"))).reduce(_ || _)
   val reservedRm        = instruction(14, 12) === 5.U || instruction(14, 12) === 6.U
   val illegalRm         = needsRoundingMode && (
     reservedRm || (instruction(14, 12) === 7.U && io.enq.fromCsr.frmIllegal)
@@ -1341,22 +1396,19 @@ class AnsDecodeUnit(val params: BundleParams = BundleParams()) extends Module {
   // 非法来源：表格未命中、压缩展开失败，或 CSR/特权状态不允许执行。
   val illegal        = rowIllegal || (isCompressed && rvc.io.illegal) || csrStateIllegal
   val illegalMask    = (BigInt(1) << AnsDecodeExceptionBits.illegalInstruction).U(params.exceptionBits.W)
-  val fetchFaultMask = if (params.exceptionBits > AnsDecodeExceptionBits.fetchFault) {
-    Mux(
-      ctrlFlow.fetchFault,
-      (BigInt(1) << AnsDecodeExceptionBits.fetchFault).U(params.exceptionBits.W),
-      0.U(params.exceptionBits.W),
-    )
-  } else {
-    0.U(params.exceptionBits.W)
-  }
-  decoded.exceptionBits := ctrlFlow.exceptionBits | Mux(
+  val fetchException = VecInit((0 until params.exceptionBits).map { unifiedBit =>
+    AnsDecodeExceptionBits.fetchBits
+      .find(_._2 == unifiedBit)
+      .map { case (frontendBit, _) => ctrlFlow.exceptionBits(frontendBit) }
+      .getOrElse(false.B)
+  })
+  decoded.exceptionBits := fetchException.asUInt | Mux(
     illegal,
     illegalMask,
     0.U(params.exceptionBits.W),
-  ) | fetchFaultMask
-  decoded.isMove        := (BitPat("b000000000000?????000?????0010011") === instruction) &&
+  )
+  decoded.isMove := (BitPat("b000000000000?????000?????0010011") === instruction) &&
     (instruction(11, 7) =/= 0.U) && !decoded.hasException
 
-  io.deq.decodedInst      := decoded
+  io.deq.decodedInst := decoded
 }

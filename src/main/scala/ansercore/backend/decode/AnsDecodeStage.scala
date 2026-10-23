@@ -28,7 +28,7 @@ class AnsDecodeStageIO(val params: BundleParams = BundleParams()) extends Bundle
   val in       = Vec(params.renameWidth, Flipped(Decoupled(new StaticInst(params))))
   val renameIn = Vec(params.renameWidth, Decoupled(new DecodedInst(params)))
 
-  val trapInstInfo     = Output(Valid(new TrapInstInfo(params)))
+  val trapInstInfo = Output(Valid(new TrapInstInfo(params)))
 
   // Both banks are read in parallel. srcType selects the bank in rename.
   val intRat = Output(
@@ -59,9 +59,9 @@ class AnsDecodeStage(val params: BundleParams = BundleParams()) extends Module {
 
   val decoded = Wire(Vec(width, new DecodedInst(params)))
   decoders.zipWithIndex.foreach { case (decoder, lane) =>
-    decoder.io.enq.ctrlFlow         := io.in(lane).bits
-    decoder.io.enq.fromCsr          := io.fromCsr
-    decoded(lane)                   := decoder.io.deq.decodedInst
+    decoder.io.enq.ctrlFlow := io.in(lane).bits
+    decoder.io.enq.fromCsr  := io.fromCsr
+    decoded(lane)           := decoder.io.deq.decodedInst
   }
 
   val t1Valid      = RegInit(VecInit(Seq.fill(width)(false.B)))
@@ -70,11 +70,11 @@ class AnsDecodeStage(val params: BundleParams = BundleParams()) extends Module {
 
   // A lane may be consumed independently. The register group can be replaced
   // only when every still-visible lane fires (or is already empty).
-  val fired = visibleValid
+  val fired  = visibleValid
     .zip(io.renameIn.map(_.ready))
     .map { case (valid, ready) => !valid || ready }
     .reduce(_ && _)
-  val accept    = fired && !io.redirect
+  val accept = fired && !io.redirect
 
   io.in.foreach(_.ready := accept)
 
