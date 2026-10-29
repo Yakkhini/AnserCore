@@ -1,6 +1,4 @@
 /*
- * SPDX-FileCopyrightText: 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
- * SPDX-FileCopyrightText: 2020-2021 Peng Cheng Laboratory
  * SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
  *
  * SPDX-License-Identifier: MulanPSL-2.0
@@ -93,25 +91,30 @@ object LowMask {
   }
 }
 
-/**
- * SelectFirstN: select n index from bit mask, low bit has high priority.
- */
+// 用 LowPriorityOH 依次取出前 n 个 1。每一项的类型与输入相同。
 object SelectFirstN {
-  def apply(in: UInt, n: Int ): Vec[UInt] = {
-    val sels = Wire(Vec(n, UInt(in.getWidth.W)))
+  def apply(in: UInt, n: Int): Vec[UInt] = {
+    VecInit(select(in.asBools, n).map(bits => VecInit(bits).asUInt))
+  }
+
+  def apply(in: Vec[Bool], n: Int): Vec[Vec[Bool]] = {
+    VecInit(select(in.toSeq, n).map(bits => VecInit(bits)))
+  }
+
+  def apply(in: Seq[Bool], n: Int): Seq[Seq[Bool]] = select(in, n)
+
+  private def select(in: Seq[Bool], n: Int): Seq[Seq[Bool]] = {
+    require(n > 0, "SelectFirstN count must be positive")
+    require(in.nonEmpty, "SelectFirstN input must not be empty")
+    val selected = Wire(Vec(n, Vec(in.length, Bool())))
     var mask = in
-
     for (i <- 0 until n) {
-      sels(i) := LowPriorityOH(mask)
-      mask = mask & ~sels(i)
+      val oneHot = LowPriorityOH(mask)
+      selected(i) := VecInit(oneHot)
+      mask = mask.zip(oneHot).map { case (bit, chosen) => bit && !chosen }
     }
-    sels
+    Seq.tabulate(n)(selected(_))
   }
-
-  def apply(in: Seq[Bool], n:Int): Vec[UInt] = {
-    apply(Cat(in), n)
-  }
-
 }
 
 object AlignDown {
@@ -185,18 +188,34 @@ object Mux1H {
   def apply(sel: UInt, in: UInt): Bool = (sel & in).orR
 }
 
-// 低编号优先。或链挡住后面的 1。输入全 0 时输出全 0。
+// 低编号优先，选出编号最小的那个 1。输入全 0 时输出全 0。
 object LowPriorityOH {
-  def apply(in: Seq[Bool]): Seq[Bool] = {
-    require(in.nonEmpty, "LowPriorityOH input must not be empty")
+  def apply(in: Seq[Bool]): Seq[Bool] = PriorityOH(in, highFirst = false, "LowPriorityOH")
+
+  def apply(in: Vec[Bool]): Vec[Bool] = VecInit(PriorityOH(in.toSeq, highFirst = false, "LowPriorityOH"))
+
+  def apply(in: UInt): UInt = VecInit(PriorityOH(in.asBools, highFirst = false, "LowPriorityOH")).asUInt
+}
+
+// 高编号优先，选出编号最大的那个 1。输入全 0 时输出全 0。
+object HighPriorityOH {
+  def apply(in: Seq[Bool]): Seq[Bool] = PriorityOH(in, highFirst = true, "HighPriorityOH")
+
+  def apply(in: Vec[Bool]): Vec[Bool] = VecInit(PriorityOH(in.toSeq, highFirst = true, "HighPriorityOH"))
+
+  def apply(in: UInt): UInt = VecInit(PriorityOH(in.asBools, highFirst = true, "HighPriorityOH")).asUInt
+}
+
+private object PriorityOH {
+  def apply(in: Seq[Bool], highFirst: Boolean, name: String): Seq[Bool] = {
+    require(in.nonEmpty, s"$name input must not be empty")
     val result = Wire(Vec(in.length, Bool()))
-    var lowerOr = false.B
-    for (i <- in.indices) {
-      result(i) := in(i) && !lowerOr
-      lowerOr = lowerOr || in(i)
+    var seen = false.B
+    val indices = if (highFirst) in.indices.reverse else in.indices
+    for (i <- indices) {
+      result(i) := in(i) && !seen
+      seen = seen || in(i)
     }
     Seq.tabulate(in.length)(result(_))
   }
-
-  def apply(in: Bits): UInt = VecInit(apply(in.asBools)).asUInt
 }
