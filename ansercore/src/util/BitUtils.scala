@@ -13,9 +13,9 @@ import scala.math.min
 
 object SignExt {
   def apply(a: UInt, len: Int): UInt = {
-    val aLen = a.getWidth
+    val aLen    = a.getWidth
     require(len >= aLen)
-    val signBit = a(aLen-1)
+    val signBit = a(aLen - 1)
     if (aLen == len) a else Cat(Fill(len - aLen, signBit), a)
   }
 }
@@ -24,26 +24,26 @@ object ZeroExt {
   def apply(a: UInt, len: Int): UInt = {
     val aLen = a.getWidth
     require(len >= aLen)
-    if (aLen == len) a(len-1,0) else Cat(0.U((len - aLen).W), a)
+    if (aLen == len) a(len - 1, 0) else Cat(0.U((len - aLen).W), a)
   }
 }
 
 object HighMask {
-  def apply(a: UInt): UInt = apply(a, includeSelf = false)
+  def apply(a: UInt): UInt                       = apply(a, includeSelf = false)
   def apply(a: UInt, includeSelf: Boolean): UInt =
     computeMask(a.asBools, includeSelf).asUInt
 
-  def apply(a: Seq[Bool]): Seq[Bool] = apply(a, includeSelf = false)
+  def apply(a: Seq[Bool]): Seq[Bool]                       = apply(a, includeSelf = false)
   def apply(a: Seq[Bool], includeSelf: Boolean): Seq[Bool] =
     computeMask(a, includeSelf).toSeq
 
-  def apply(a: Vec[Bool]): Vec[Bool] = apply(a, includeSelf = false)
+  def apply(a: Vec[Bool]): Vec[Bool]                       = apply(a, includeSelf = false)
   def apply(a: Vec[Bool], includeSelf: Boolean): Vec[Bool] =
     computeMask(a.toSeq, includeSelf)
 
   private def computeMask(a: Seq[Bool], includeSelf: Boolean): Vec[Bool] = {
     require(a.nonEmpty, "HighMask input must not be empty")
-    val result = Wire(Vec(a.length, Bool()))
+    val result  = Wire(Vec(a.length, Bool()))
     var lowerOr = false.B
     for (i <- a.indices) {
       if (includeSelf) {
@@ -57,16 +57,16 @@ object HighMask {
     result
   }
 }
-object LowMask {
-  def apply(a: UInt): UInt = apply(a, includeSelf = false)
+object LowMask  {
+  def apply(a: UInt): UInt                       = apply(a, includeSelf = false)
   def apply(a: UInt, includeSelf: Boolean): UInt =
     computeMask(a.asBools, includeSelf).asUInt
 
-  def apply(a: Seq[Bool]): Seq[Bool] = apply(a, includeSelf = false)
+  def apply(a: Seq[Bool]): Seq[Bool]                       = apply(a, includeSelf = false)
   def apply(a: Seq[Bool], includeSelf: Boolean): Seq[Bool] =
     computeMask(a, includeSelf).toSeq
 
-  def apply(a: Vec[Bool]): Vec[Bool] = apply(a, includeSelf = false)
+  def apply(a: Vec[Bool]): Vec[Bool]                       = apply(a, includeSelf = false)
   def apply(a: Vec[Bool], includeSelf: Boolean): Vec[Bool] =
     computeMask(a.toSeq, includeSelf)
 
@@ -74,9 +74,9 @@ object LowMask {
     require(a.nonEmpty, "LowMask input must not be empty")
     assert(
       PopCount(a) === 1.U,
-      "LowMask expects exactly one bit set"
+      "LowMask expects exactly one bit set",
     )
-    val result = Wire(Vec(a.length, Bool()))
+    val result  = Wire(Vec(a.length, Bool()))
     var upperOr = false.B
     for (i <- a.indices.reverse) {
       if (includeSelf) {
@@ -93,13 +93,11 @@ object LowMask {
 
 // 用 LowPriorityOH 依次取出前 n 个 1。每一项的类型与输入相同。
 object SelectFirstN {
-  def apply(in: UInt, n: Int): Vec[UInt] = {
+  def apply(in: UInt, n: Int): Vec[UInt] =
     VecInit(select(in.asBools, n).map(bits => VecInit(bits).asUInt))
-  }
 
-  def apply(in: Vec[Bool], n: Int): Vec[Vec[Bool]] = {
+  def apply(in: Vec[Bool], n: Int): Vec[Vec[Bool]] =
     VecInit(select(in.toSeq, n).map(bits => VecInit(bits)))
-  }
 
   def apply(in: Seq[Bool], n: Int): Seq[Seq[Bool]] = select(in, n)
 
@@ -107,7 +105,7 @@ object SelectFirstN {
     require(n > 0, "SelectFirstN count must be positive")
     require(in.nonEmpty, "SelectFirstN input must not be empty")
     val selected = Wire(Vec(n, Vec(in.length, Bool())))
-    var mask = in
+    var mask     = in
     for (i <- 0 until n) {
       val oneHot = LowPriorityOH(mask)
       selected(i) := VecInit(oneHot)
@@ -118,39 +116,36 @@ object SelectFirstN {
 }
 
 object AlignDown {
-  def apply(x: UInt, align: Int ): UInt= {???}
-  def apply(x: UInt, align: UInt): UInt= {???}
+  def apply(x: UInt, align: Int): UInt  = ???
+  def apply(x: UInt, align: UInt): UInt = ???
 }
 
 object AlignUp {
-  def apply(x: UInt, align: Int ): UInt= {???}
-  def apply(x: UInt, align: UInt): UInt= {???}
+  def apply(x: UInt, align: Int): UInt  = ???
+  def apply(x: UInt, align: UInt): UInt = ???
 }
 
-
-object IsOneHot{
-  def apply(x: UInt): Bool = {
+object IsOneHot {
+  def apply(x: UInt): Bool =
     x.orR && AtMostOneHot(x)
-  }
 }
 
-object AtMostOneHot{
-  def apply(x: UInt): Bool ={
+object AtMostOneHot {
+  def apply(x: UInt): Bool =
     (x & (x - 1.U)) === 0.U
-  }
 }
 
-object XorFold{
-  def apply(x: UInt, inWidth: Int, outWidth: Int): UInt ={
+object XorFold {
+  def apply(x: UInt, inWidth: Int, outWidth: Int): UInt = {
     require(inWidth >= outWidth && outWidth > 0)
     val xWidth = x.getWidth
 
     val useWidth = math.min(xWidth, inWidth)
 
-    val nChunks = (useWidth + outWidth -1)/ outWidth
-    val chunks = (0 until nChunks).map{i =>
+    val nChunks = (useWidth + outWidth - 1) / outWidth
+    val chunks  = (0 until nChunks).map { i =>
       val lo = i * outWidth
-      val hi = math.min(lo + outWidth, useWidth) -1
+      val hi = math.min(lo + outWidth, useWidth) - 1
       x(hi, lo).pad(outWidth)
     }
 
@@ -162,11 +157,11 @@ object XorFold{
 
 object Mux1H {
   def apply[T <: Data](in: Iterable[(Bool, T)]): T = {
-    val terms = in.toSeq
+    val terms  = in.toSeq
     require(terms.nonEmpty, "Mux1H input must not be empty")
-    val proto = terms.head._2
+    val proto  = terms.head._2
     require(proto.widthOption.isDefined, "Mux1H data width must be known")
-    val width = proto.getWidth
+    val width  = proto.getWidth
     require(width > 0, "Mux1H data width must be positive")
     val masked = terms.map { case (sel, data) =>
       require(data.getWidth == width, "Mux1H data widths must match")
@@ -209,8 +204,8 @@ object HighPriorityOH {
 private object PriorityOH {
   def apply(in: Seq[Bool], highFirst: Boolean, name: String): Seq[Bool] = {
     require(in.nonEmpty, s"$name input must not be empty")
-    val result = Wire(Vec(in.length, Bool()))
-    var seen = false.B
+    val result  = Wire(Vec(in.length, Bool()))
+    var seen    = false.B
     val indices = if (highFirst) in.indices.reverse else in.indices
     for (i <- indices) {
       result(i) := in(i) && !seen

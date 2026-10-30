@@ -10,47 +10,47 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.random.LFSR
 
-abstract class ReplacementPolicy(val nWays: Int){
+abstract class ReplacementPolicy(val nWays: Int) {
   require(nWays >= 2, "requires at least two ways")
 
-  def width: Int
+  def width:           Int
   def getReplaceWayOH: UInt
 
   protected def getNextState(prevState: UInt, touchWayOH: UInt): UInt
-  protected def state: UInt
+  protected def state:                                           UInt
 
-  final def update(touchWayOH: UInt): Unit ={
+  final def update(touchWayOH: UInt): Unit = {
     require(touchWayOH.getWidth == nWays)
     assert(
       PopCount(touchWayOH) === 1.U,
-      "touchWayOH must be exactly one-hot"
+      "touchWayOH must be exactly one-hot",
     )
 
     state := getNextState(state, touchWayOH)
   }
 
-  final def update(touchWayOH: Vec[Bool]): Unit ={
+  final def update(touchWayOH: Vec[Bool]): Unit = {
     assert(
       PopCount(touchWayOH) === 1.U,
-      "touchWayOH must be exactly one-hot"
+      "touchWayOH must be exactly one-hot",
     )
     update(touchWayOH.asUInt)
   }
 
-  final def update(touchWayOH: Seq[Bool]): Unit ={
+  final def update(touchWayOH: Seq[Bool]): Unit = {
     assert(
       PopCount(touchWayOH) === 1.U,
-      "touchWayOH must be exactly one-hot"
+      "touchWayOH must be exactly one-hot",
     )
     update(VecInit(touchWayOH).asUInt)
   }
 
   final def updateMany(touchWayOHs: Seq[UInt]): Unit = {
     var tempState = state
-    touchWayOHs.foreach{ touch =>
+    touchWayOHs.foreach { touch =>
       assert(
         PopCount(touch) === 1.U,
-        "touchWayOH must be exactly one-hot"
+        "touchWayOH must be exactly one-hot",
       )
       require(touch.getWidth == nWays)
 
@@ -61,33 +61,30 @@ abstract class ReplacementPolicy(val nWays: Int){
 
 }
 
-class Random(nWays: Int) extends ReplacementPolicy(nWays){
-  override val width: Int = log2Ceil(nWays)
+class Random(nWays: Int) extends ReplacementPolicy(nWays) {
+  override val width: Int            = log2Ceil(nWays)
   override def getReplaceWayOH: UInt = {
-    if(isPow2(nWays)){
-      UIntToOH(state(width-1,0))
-    }else {
-     VecInit(PriorityEncoderOH(partition(state, nWays))).asUInt
+    if (isPow2(nWays)) {
+      UIntToOH(state(width - 1, 0))
+    } else {
+      VecInit(PriorityEncoderOH(partition(state, nWays))).asUInt
     }
   }
 
-  override protected val state: UInt = LFSR(16)
+  override protected val state: UInt                                           = LFSR(16)
   override protected def getNextState(prevState: UInt, touchWayOH: UInt): UInt = {
     throw new UnsupportedOperationException(
       "Random replacement does not support update"
     )
   }
 
-
-  private def partition(value: UInt, slices: Int): Seq[Bool] ={
+  private def partition(value: UInt, slices: Int): Seq[Bool] =
     Seq.tabulate(slices)(i => value < (((i + 1) << value.getWidth) / slices).U)
-  }
 
 }
 
-
-class TrueLRU(nWays: Int) extends ReplacementPolicy(nWays){
-/*
+class TrueLRU(nWays: Int) extends ReplacementPolicy(nWays) {
+  /*
 Example 4-way (6-bits):
 aij 表示 i old j
    aij       way 0   way 1   way 2   way 3
@@ -102,14 +99,14 @@ state[3] - 1 more old than 2
 state[2] - 0 more old than 3
 state[1] - 0 more old than 2
 state[0] - 0 more old than 1
-*/
-  override val width: Int = (nWays * (nWays-1)) / 2
-  override def getReplaceWayOH: UInt = {
+   */
+  override val width: Int                                                      = (nWays * (nWays - 1)) / 2
+  override def getReplaceWayOH: UInt                                           = {
     val oldest = getOldestWayOH(VecInit.fill(nWays)(true.B).asUInt)
     oldest
   }
-  override protected val state = Reg(UInt(width.W))
-  override protected def getNextState(prevState: UInt, touchWayOH: UInt): UInt ={
+  override protected val state                                                 = Reg(UInt(width.W))
+  override protected def getNextState(prevState: UInt, touchWayOH: UInt): UInt = {
     val nextStateVec = Wire(Vec(width, Bool()))
     for (low <- 0 until nWays - 1) {
       for (high <- low + 1 until nWays) {
@@ -117,8 +114,8 @@ state[0] - 0 more old than 1
 
         nextStateVec(idx) := Mux(
           touchWayOH(low) || touchWayOH(high),
-          touchWayOH(high),  // low high 不会同时访问，  访问low的时候为0, low 比 high新，所以为0, 访问high的时候，表示low 比high 旧
-          prevState(idx)
+          touchWayOH(high), // low high 不会同时访问，  访问low的时候为0, low 比 high新，所以为0, 访问high的时候，表示low 比high 旧
+          prevState(idx),
         )
       }
     }
@@ -126,9 +123,9 @@ state[0] - 0 more old than 1
     nextStateVec.asUInt
   }
 
-  val ageMatrix = (0 until nWays).map{ i =>
+  val ageMatrix = (0 until nWays).map { i =>
     VecInit(
-      (0 until nWays).map{j =>
+      (0 until nWays).map { j =>
         getAgeBit(state, i, j)
       }
     ).asUInt
@@ -142,24 +139,22 @@ state[0] - 0 more old than 1
     base + high - low - 1
   }
 
-
-  private def getAgeBit(state: UInt, i: Int, j: Int): Bool ={
-    if(i == j){
+  private def getAgeBit(state: UInt, i: Int, j: Int): Bool = {
+    if (i == j) {
       true.B
     } else {
-      val (low, high) = {
-        if(i < j) (i, j)
-        else (j,i)
-      }
+      val (low, high) =
+        if (i < j) (i, j)
+        else (j, i)
 
       val idx = bitIndex(low, high)
 
       if (i < j) state(idx)
-      else       !state(idx)
+      else !state(idx)
     }
   }
 
-  def getOldestWayOH(candidate: UInt):UInt ={
+  def getOldestWayOH(candidate: UInt): UInt = {
     require(candidate.getWidth == nWays)
     VecInit(
       (0 until nWays).map { i =>
@@ -169,18 +164,17 @@ state[0] - 0 more old than 1
   }
 }
 
-
 /*
-   * The tree is numbered breadth first.  Thus a 4-way tree has
-   *
-   *                 state[0]
-   *              state[1] state[2]
-   *
-   * and an 8-way tree adds state[3]..state[6].  For a non-power-of-two
-   * number of ways, the same numbering is used after constructing a
-   * balanced tree with exactly nWays leaves (and nWays - 1 internal nodes).
-   *
-   * example 5-way：
+ * The tree is numbered breadth first.  Thus a 4-way tree has
+ *
+ *                 state[0]
+ *              state[1] state[2]
+ *
+ * and an 8-way tree adds state[3]..state[6].  For a non-power-of-two
+ * number of ways, the same numbering is used after constructing a
+ * balanced tree with exactly nWays leaves (and nWays - 1 internal nodes).
+ *
+ * example 5-way：
 
                            state[0]
                          /          \
@@ -195,23 +189,21 @@ state[0] - 0 more old than 1
   way2 = !state[0] && state[2]
   way3 = !state[0] && !state[2] && state[3]
   way4 = !state[0] && !state[2] && !state[3]
-*/
-class PseudoLRU(nWays: Int) extends ReplacementPolicy(nWays){
-  override val width: Int = nWays - 1
-  override def getReplaceWayOH: UInt = {
+ */
+class PseudoLRU(nWays: Int) extends ReplacementPolicy(nWays) {
+  override val width: Int            = nWays - 1
+  override def getReplaceWayOH: UInt =
     VecInit((0 until nWays).map(way => choose(tree, way))).asUInt
-  }
 
   override protected def getNextState(prevState: UInt, touchWayOH: UInt): UInt = {
     val nextState = Wire(Vec(width, Bool()))
 
     def updateNode(node: TreeNode): Unit = {
       if (node.left.nonEmpty) {
-        val touchedLeft = node.left.get.ways.map(touchWayOH(_)).reduce(_ || _)
+        val touchedLeft  = node.left.get.ways.map(touchWayOH(_)).reduce(_ || _)
         val touchedRight = node.right.get.ways.map(touchWayOH(_)).reduce(_ || _)
         // A touched way makes the tree point to the opposite subtree.
-        nextState(node.index) := Mux(touchedLeft || touchedRight,
-          touchedRight, prevState(node.index))
+        nextState(node.index) := Mux(touchedLeft || touchedRight, touchedRight, prevState(node.index))
         updateNode(node.left.get)
         updateNode(node.right.get)
       }
@@ -219,13 +211,13 @@ class PseudoLRU(nWays: Int) extends ReplacementPolicy(nWays){
     updateNode(tree)
     nextState.asUInt
   }
-  override protected val state = Reg(UInt(width.W))
+  override protected val state                                                 = Reg(UInt(width.W))
 
-  private final class TreeNode(
-    val ways: Seq[Int],
-    val left: Option[TreeNode],
+  final private class TreeNode(
+    val ways:  Seq[Int],
+    val left:  Option[TreeNode],
     val right: Option[TreeNode],
-    var index: Int = -1
+    var index: Int = -1,
   )
 
   private def makeTree(ways: Seq[Int]): TreeNode = {
@@ -236,14 +228,13 @@ class PseudoLRU(nWays: Int) extends ReplacementPolicy(nWays){
       new TreeNode(
         ways,
         Some(makeTree(ways.take(leftSize))),
-        Some(makeTree(ways.drop(leftSize)))
+        Some(makeTree(ways.drop(leftSize))),
       )
     }
   }
 
-
   private def numberTree(root: TreeNode): Unit = {
-    val queue = scala.collection.mutable.Queue[TreeNode](root)
+    val queue     = scala.collection.mutable.Queue[TreeNode](root)
     var nextIndex = 0
     while (queue.nonEmpty) {
       val node = queue.dequeue()
@@ -270,42 +261,41 @@ class PseudoLRU(nWays: Int) extends ReplacementPolicy(nWays){
   private val tree: TreeNode = makeTree(0 until nWays)
   numberTree(tree)
 
-
 }
 
-class StaticRRIP(nWays: Int) extends ReplacementPolicy(nWays){
-  override val  width: Int = nWays -1
-  override def getReplaceWayOH: UInt = ???
-  override protected val state = Reg(UInt(width.W))
+class StaticRRIP(nWays: Int) extends ReplacementPolicy(nWays) {
+  override val width: Int                                             = nWays - 1
+  override def getReplaceWayOH: UInt                                  = ???
+  override protected val state                                        = Reg(UInt(width.W))
   protected def getNextState(prevState: UInt, touchWayOH: UInt): UInt = ???
 }
 
-class BimodalRRIP(nWays: Int) extends ReplacementPolicy(nWays){
-  override val  width: Int = nWays -1
-  override def getReplaceWayOH: UInt = ???
-  override protected val state = Reg(UInt(width.W))
+class BimodalRRIP(nWays: Int) extends ReplacementPolicy(nWays) {
+  override val width: Int                                             = nWays - 1
+  override def getReplaceWayOH: UInt                                  = ???
+  override protected val state                                        = Reg(UInt(width.W))
   protected def getNextState(prevState: UInt, touchWayOH: UInt): UInt = ???
 
 }
 
-class DynamicRRIP(nWays: Int) extends ReplacementPolicy(nWays){
-  override val  width: Int = nWays -1
-  override def getReplaceWayOH: UInt = ???
-  override protected val state = Reg(UInt(width.W))
+class DynamicRRIP(nWays: Int) extends ReplacementPolicy(nWays) {
+  override val width: Int                                             = nWays - 1
+  override def getReplaceWayOH: UInt                                  = ???
+  override protected val state                                        = Reg(UInt(width.W))
   protected def getNextState(prevState: UInt, touchWayOH: UInt): UInt = ???
 
 }
 
 object ReplacementPolicy {
-  def apply(name: String, nWays: Int): ReplacementPolicy= {
+  def apply(name: String, nWays: Int): ReplacementPolicy = {
     name.toLowerCase match {
       case "random" => new Random(nWays)
-      case "lru" => new TrueLRU(nWays)
-      case "plru" => new PseudoLRU(nWays)
-      case "srrip" => new StaticRRIP(nWays)
-      case "brrip" => new BimodalRRIP(nWays)
-      case "drrip" => new DynamicRRIP(nWays)
-      case _ => throw new IllegalArgumentException("Unknown ReplacementPolicy type")
+      case "lru"    => new TrueLRU(nWays)
+      case "plru"   => new PseudoLRU(nWays)
+      case "srrip"  => new StaticRRIP(nWays)
+      case "brrip"  => new BimodalRRIP(nWays)
+      case "drrip"  => new DynamicRRIP(nWays)
+      case _        => throw new IllegalArgumentException("Unknown ReplacementPolicy type")
     }
   }
 }
