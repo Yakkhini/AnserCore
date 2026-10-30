@@ -1,6 +1,9 @@
 .envrc
 .direnv
 
+.vscode/
+*.code-workspace
+
 .pre-commit-config.yaml
 
 out
