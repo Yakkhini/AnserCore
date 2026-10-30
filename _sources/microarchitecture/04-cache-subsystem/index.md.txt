@@ -15,6 +15,9 @@ AnserCore 缓存子系统微架构文档
 {doc}`mshrctrl <mshrctrl>`
 : MSHR（Miss Status Handling Register）控制模块，管理所有 miss / probe / refill / release 等跨周期事务，默认包含 16 项 MSHR。
 
+{doc}`compactchi <compactchi>`
+: Compact CHI 协议环境，提供请求方 Flit、通道端口、Opcode、Resp 编码和基础消息填装 helper。
+
 ### 特性 1：采用类 MESI 的缓存一致性协议
 
 YQH-L2 遵循 TileLink 一致性树的规则，其缓存行状态包括 N（Nothing）、B（Branch）、T（Trunk）、TT（Tip）4 个状态：
@@ -55,4 +58,5 @@ YQH-L2 遵循 TileLink 一致性树的规则，其缓存行状态包括 N（Noth
 :hidden:
 
 mshrctrl
+compactchi
 ```
