@@ -114,7 +114,7 @@ state[0] - 0 more old than 1
 
         nextStateVec(idx) := Mux(
           touchWayOH(low) || touchWayOH(high),
-          touchWayOH(high), // low high 不会同时访问，  访问low的时候为0, low 比 high新，所以为0, 访问high的时候，表示low 比high 旧
+          touchWayOH(high), // low high 不会同时访问，访问 low 的时候为 0, low 比 high 新，所以为 0, 访问 high 的时候，表示 low 比 high 旧
           prevState(idx),
         )
       }
