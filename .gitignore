@@ -6,5 +6,9 @@
 docs/_build
 docs/html
 
-.bsp/                                                                                                                                                                                      
-.scala-build/ 
+.bsp/
+.scala-build/
+.bloop/
+out/
+build/
+test_run_dir/

@@ -66,6 +66,10 @@ object Bundles {
     maxExuCount:         Int = 8,
     /** Maximum number of replicated wakeup destinations / 唤醒复制目的端的最大数量. */
     maxWakeupCopies:     Int = 2,
+    /** Integer RegCache entries / 整数寄存器缓存条目数. */
+    intRegCacheEntries:  Int = 16,
+    /** Memory RegCache entries / 访存寄存器缓存条目数. */
+    memRegCacheEntries:  Int = 12,
   ) {
     require(xlen > 0, "xlen must be positive")
     require(pcWidth > 0, "pcWidth must be positive")
@@ -84,12 +88,19 @@ object Bundles {
     )
     require(maxLatency > 0, "maximum latency must be positive")
     require(maxExuCount > 0 && maxWakeupCopies >= 0, "execution-unit parameters are invalid")
+    require(intRegCacheEntries > 0 && memRegCacheEntries > 0, "RegCache sizes must be positive")
 
     /** Width of the FTQ pointer value field. */
     def ftqPtrWidth: Int = widthFor(ftqEntries)
 
     /** Width of the FTQ entry offset field. */
     def ftqOffsetWidth: Int = widthFor(predictWidth)
+
+    /** Total RegCache entries / 寄存器缓存总条目数. */
+    def regCacheEntries: Int = intRegCacheEntries + memRegCacheEntries
+
+    /** Global RegCache index width / 寄存器缓存全局索引位宽. */
+    def regCacheIndexWidth: Int = widthFor(regCacheEntries)
   }
 
   /** Circular pointer into the fetch target queue.
@@ -1065,6 +1076,12 @@ object Bundles {
       params.numSrc,
       Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W)),
     )
+
+    /** 每个源操作数是否命中 RegCache；由 Dispatch 查询标签表后填写。 */
+    val useRegCache = Vec(params.numSrc, Bool())
+
+    /** 命中 RegCache 时对应的全局索引；未命中时无意义。 */
+    val regCacheIdx = Vec(params.numSrc, UInt(params.regCacheIndexWidth.W))
 
     /** 重命名后的物理源寄存器号。 */
     val psrc = Vec(params.numSrc, UInt(params.physicalRegWidth.W))

@@ -22,6 +22,7 @@ path = [
     ".gitlint",
     ".scalafix.conf",
     ".scalafmt.conf",
+    ".mill-version",
     "docs/requirements.txt",
     "flake.lock",
 ]
