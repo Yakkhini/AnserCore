@@ -4,16 +4,22 @@
  * SPDX-License-Identifier: MulanPSL-2.0
  */
 
+// The state predicates are based on the XiangShan implementation:
+// https://github.com/OpenXiangShan/XiangShan/blob/master/src/main/scala/xiangshan/frontend/bpu/SaturateCounter.scala
+// Copyright (c) 2024-2026 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2026 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+
 package utils
 
 import chisel3._
 import chisel3.util._
 
-class SaturateCounter(width: Int) extends Bundle { // scalastyle:ignore number.of.methods
+class SaturateCounter(width: Int) extends Bundle {
   val value: UInt = UInt(width.W)
 
   def ===(that: SaturateCounter): Bool = this.value === that.value
-  def =/=(that: SaturateCounter): Bool = this.value =/= that.value // scalastyle:ignore method.name
+  def =/=(that: SaturateCounter): Bool = this.value =/= that.value
   def <(that:   SaturateCounter): Bool = this.value < that.value
   def <=(that:  SaturateCounter): Bool = this.value <= that.value
   def >(that:   SaturateCounter): Bool = this.value > that.value

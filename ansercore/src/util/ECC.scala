@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: MulanPSL-2.0
  */
 
+// The SEC and SECDED design is based on the Rocket Chip implementation:
+//          https://github.com/chipsalliance/rocket-chip/blob/master/src/main/scala/util/ECC.scala
+// See LICENSE.Berkeley for license details:
+//          https://github.com/chipsalliance/rocket-chip/blob/master/LICENSE.Berkeley
+
 package utils
 
 import chisel3._

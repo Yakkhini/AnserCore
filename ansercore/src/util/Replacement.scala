@@ -4,6 +4,13 @@
  * SPDX-License-Identifier: MulanPSL-2.0
  */
 
+// The TrueLRU design is based on the Rocket Chip implementation:
+//          https://github.com/chipsalliance/rocket-chip/blob/master/src/main/scala/util/Replacement.scala
+// See LICENSE.Berkeley for license details:
+//          https://github.com/chipsalliance/rocket-chip/blob/master/LICENSE.Berkeley
+// See LICENSE.SiFive for license details:
+//          https://github.com/chipsalliance/rocket-chip/blob/master/LICENSE.SiFive
+
 package utils
 
 import chisel3._
