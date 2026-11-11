@@ -13,7 +13,7 @@ class SRAMMacro1RW(
   set:      Int,
   dataBits: Int,
 ) extends Module {
-  // 同深度同位宽合并成一个模块。换真 SRAM 时按这个名字和端口整块替换，不要动里面的 mem_*。
+  // Same depth and width share one module. Swap in a real SRAM by this name and these ports; do not touch mem_*.
   override def desiredName = s"SRAMMacro1RW_${set}x${dataBits}"
 
   val io = IO(new Bundle {
@@ -60,7 +60,7 @@ class SinglePortSRAMTemplate[T <: Data](
     val addr      = Input(UInt(addrWidth.W))
     val wdata     = Input(gen.cloneType)
     val rdata     = Output(gen.cloneType)
-    // 端口随参数消失，避免关闭功能后还留下复位脚。
+    // Ports disappear with the parameters, so a disabled feature leaves no reset pins.
     val resetReq  = if (externalReset) Some(Input(Bool())) else None
     val resetDown = if (resetEn) Some(Output(Bool())) else None
   })
@@ -87,7 +87,8 @@ class SinglePortSRAMTemplate[T <: Data](
         value.litValue.U(gen.getWidth.W)
     }
 
-    // externalReset 隐含系统复位时也自动刷新。resetReq 与 reset 一样把扫表装回起点，按住时停在地址 0。
+    // externalReset also refreshes on system reset. resetReq, like reset,
+    // restarts the sweep at address 0 and holds there while asserted.
     def sweep(): (Bool, UInt) = {
       val resetting = RegInit(true.B)
       val idxNow    = if (set == 1) {

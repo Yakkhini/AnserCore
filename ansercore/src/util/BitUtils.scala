@@ -91,7 +91,7 @@ object LowMask  {
   }
 }
 
-// 用 LowPriorityOH 依次取出前 n 个 1。每一项的类型与输入相同。
+// Pick the first n ones with LowPriorityOH. Each result has the same type as the input.
 object SelectFirstN {
   def apply(in: UInt, n: Int): Vec[UInt] =
     VecInit(select(in.asBools, n).map(bits => VecInit(bits).asUInt))
@@ -183,7 +183,7 @@ object Mux1H {
   def apply(sel: UInt, in: UInt): Bool = (sel & in).orR
 }
 
-// 低编号优先，选出编号最小的那个 1。输入全 0 时输出全 0。
+// Lowest index wins. An all-zero input yields all zeros.
 object LowPriorityOH {
   def apply(in: Seq[Bool]): Seq[Bool] = PriorityOH(in, highFirst = false, "LowPriorityOH")
 
@@ -192,7 +192,7 @@ object LowPriorityOH {
   def apply(in: UInt): UInt = VecInit(PriorityOH(in.asBools, highFirst = false, "LowPriorityOH")).asUInt
 }
 
-// 高编号优先，选出编号最大的那个 1。输入全 0 时输出全 0。
+// Highest index wins. An all-zero input yields all zeros.
 object HighPriorityOH {
   def apply(in: Seq[Bool]): Seq[Bool] = PriorityOH(in, highFirst = true, "HighPriorityOH")
 

@@ -10,20 +10,20 @@ import chisel3._
 import chisel3.util._
 import dataclass.data
 
-trait EccResult {
-  def rawData:            UInt // 原始数据
-  def correctedData:      UInt // 被修复的数据
-  def correctableError:   Bool // 发生了可恢复的错误
-  def uncorrectableError: Bool // 发生了不可恢复的错误
+trait ECCResult {
+  def rawData:            UInt // raw data
+  def correctedData:      UInt // corrected data
+  def correctableError:   Bool // a correctable error occurred
+  def uncorrectableError: Bool // an uncorrectable error occurred
   def error = correctableError || uncorrectableError
 }
 
-abstract class EccCode(val dataWidth: Int) {
+abstract class ECCCode(val dataWidth: Int) {
   require(dataWidth >= 1)
 
   def parityWidth:                                                                            Int
   protected def codeEncode(data:     UInt, enableErrorInjection: Boolean, injectError: Bool): UInt
-  protected def codeDecode(codeword: UInt):                                                   EccResult
+  protected def codeDecode(codeword: UInt):                                                   ECCResult
 
   final def codeWidth: Int = dataWidth + parityWidth
 
@@ -34,13 +34,13 @@ abstract class EccCode(val dataWidth: Int) {
 
   final def encode(data: UInt): UInt = encode(data, false, false.B)
 
-  final def decode(codeword: UInt): EccResult = {
+  final def decode(codeword: UInt): ECCResult = {
     require(codeword.getWidth == codeWidth)
     codeDecode(codeword)
   }
 }
 
-class ParityCode(dataWidth: Int) extends EccCode(dataWidth) {
+class ParityCode(dataWidth: Int) extends ECCCode(dataWidth) {
 
   override val parityWidth = 1
 
@@ -56,7 +56,7 @@ class ParityCode(dataWidth: Int) extends EccCode(dataWidth) {
     Cat(encodedParity, data)
   }
 
-  override protected def codeDecode(codeword: UInt): EccResult = new EccResult {
+  override protected def codeDecode(codeword: UInt): ECCResult = new ECCResult {
     val rawData            = codeword(codeword.getWidth - 2, 0)
     val correctedData      = rawData
     val correctableError   = false.B
@@ -64,7 +64,7 @@ class ParityCode(dataWidth: Int) extends EccCode(dataWidth) {
   }
 }
 
-class SecCode(dataWidth: Int) extends EccCode(dataWidth) {
+class SECCode(dataWidth: Int) extends ECCCode(dataWidth) {
   override val parityWidth = {
     require(dataWidth >= 1)
     var m = 0
@@ -96,7 +96,7 @@ class SecCode(dataWidth: Int) extends EccCode(dataWidth) {
     Cat(VecInit(parity).asUInt, data)
   }
 
-  override protected def codeDecode(codeword: UInt): EccResult = {
+  override protected def codeDecode(codeword: UInt): ECCResult = {
     val syndrome = VecInit((0 until parityWidth).map { j =>
       (1 to codeWidth)
         .filter(p => (p & (1 << j)) != 0)
@@ -122,7 +122,7 @@ class SecCode(dataWidth: Int) extends EccCode(dataWidth) {
     val correctedCode   = codeword ^ sysBadBitOH
     val invalidSyndrome = badPosition > codeWidth.U
 
-    new EccResult {
+    new ECCResult {
       val rawData            = raw
       val correctedData      = correctedCode(dataWidth - 1, 0)
       val uncorrectableError = invalidSyndrome
@@ -131,8 +131,8 @@ class SecCode(dataWidth: Int) extends EccCode(dataWidth) {
   }
 }
 
-class SecDedCode(dataWidth: Int) extends EccCode(dataWidth) {
-  private val secCode = new SecCode(dataWidth)
+class SECDEDCode(dataWidth: Int) extends ECCCode(dataWidth) {
+  private val secCode = new SECCode(dataWidth)
 
   override val parityWidth                                                                              = secCode.parityWidth + 1
   override protected def codeEncode(data: UInt, enableErrorInjection: Boolean, injectError: Bool): UInt = {
@@ -142,7 +142,7 @@ class SecDedCode(dataWidth: Int) extends EccCode(dataWidth) {
     Cat(overallParity, secWord)
   }
 
-  override protected def codeDecode(codeword: UInt): EccResult = {
+  override protected def codeDecode(codeword: UInt): ECCResult = {
     val secWord   = codeword(secCode.codeWidth - 1, 0)
     val secResult = secCode.decode(secWord)
     val raw       = codeword(dataWidth - 1, 0)
@@ -152,24 +152,24 @@ class SecDedCode(dataWidth: Int) extends EccCode(dataWidth) {
     // syndrome == 0 and odd parity identifies an overall-parity-bit error.
     val overallError   = codeword.xorR
     val syndromeError  = secResult.correctableError
-    val singleSecError = overallError && syndromeError
+    val singleSECError = overallError && syndromeError
     val doubleError    = !overallError && syndromeError
 
-    new EccResult {
+    new ECCResult {
       val rawData            = raw
       val correctedData      = secResult.correctedData
-      val correctableError   = singleSecError
+      val correctableError   = singleSECError
       val uncorrectableError = doubleError
     }
   }
 
 }
 
-object EccType {
-  def apply(name: String, dataWidth: Int): EccCode = name.toLowerCase match {
+object ECCType {
+  def apply(name: String, dataWidth: Int): ECCCode = name.toLowerCase match {
     case "parity" => new ParityCode(dataWidth)
-    case "sec"    => new SecCode(dataWidth)
-    case "secded" => new SecDedCode(dataWidth)
-    case _        => throw new IllegalArgumentException("Unknown Ecc type")
+    case "sec"    => new SECCode(dataWidth)
+    case "secded" => new SECDEDCode(dataWidth)
+    case _        => throw new IllegalArgumentException("Unknown ECC type")
   }
 }

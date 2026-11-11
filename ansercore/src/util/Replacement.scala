@@ -86,7 +86,7 @@ class Random(nWays: Int) extends ReplacementPolicy(nWays) {
 class TrueLRU(nWays: Int) extends ReplacementPolicy(nWays) {
   /*
 Example 4-way (6-bits):
-aij 表示 i old j
+aij means i is older than j
    aij       way 0   way 1   way 2   way 3
   way 0       1      s0      s1      s2
   way 1      !s0      1      s3      s4
@@ -114,7 +114,7 @@ state[0] - 0 more old than 1
 
         nextStateVec(idx) := Mux(
           touchWayOH(low) || touchWayOH(high),
-          touchWayOH(high), // low high 不会同时访问，访问 low 的时候为 0, low 比 high 新，所以为 0, 访问 high 的时候，表示 low 比 high 旧
+          touchWayOH(high), // low and high are never both touched; 0 means low is newer, 1 means low is older
           prevState(idx),
         )
       }
