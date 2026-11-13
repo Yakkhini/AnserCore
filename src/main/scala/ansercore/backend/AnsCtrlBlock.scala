@@ -14,6 +14,7 @@ import ansercore.backend.Bundles._
 import ansercore.backend.decode.{AnsDecodeGroup, AnsFusionDecodeInfo, AnsFusionDecoder}
 import ansercore.backend.dispatch._
 import ansercore.backend.exu.csr.AnsCsrDecodeState
+import ansercore.backend.issue.AnsIssueParams
 import ansercore.backend.rename._
 
 /** CtrlBlock 的调试镜像，覆盖 decode-to-rename 边界。 */
@@ -63,7 +64,7 @@ class AnsCtrlBlockIO(val params: BundleParams = BundleParams()) extends Bundle {
   val lsqEnq        = Flipped(new AnsLsqEnqIO(params))
 
   // Scheduler / MemBlock 回送的状态。
-  val IQValidNumVec = Input(Vec(AnsDispatchParams.IQEnqSum, UInt(AnsDispatchParams.iqValidNumWidth.W)))
+  val IQValidNumVec = Input(Vec(AnsIssueParams.nExu, UInt(AnsDispatchParams.iqValidNumWidth.W)))
   val wbPregsInt    = Input(Vec(AnsDispatchParams.nIntWb, Valid(UInt(params.physicalRegWidth.W))))
   val wbPregsFp     = Input(Vec(AnsDispatchParams.nFpWb, Valid(UInt(params.physicalRegWidth.W))))
   val wakeUpAll     = Input(new AnsIQWakeUpVec(params))

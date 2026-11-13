@@ -16,6 +16,7 @@ import chisel3.util._
 import ansercore.backend.Bundles._
 import ansercore.backend.dispatch._
 import ansercore.backend.exu.csr.AnsCsrStub
+import ansercore.backend.issue._
 import ansercore.backend.rename._
 import ansercore.backend.rob.AnsRobStub
 
@@ -76,23 +77,146 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
   ctrlBlock.io.enqRob.isEmpty              := rob.io.enq.isEmpty
   ctrlBlock.io.enqRob.resp                 := rob.io.enq.resp
 
-  // TODO: 用真实 IQ 替换：当前永远可接收，Dispatch 输出悬空。
-  for (port <- 0 until AnsDispatchParams.IQEnqSum) {
-    ctrlBlock.io.toIssueQueues(port).ready := true.B
+  // ---- Issue / DataPath ----
+  val intSchd  = Module(new AnsScheduler(params, AnsIssueParams.intScheduler))
+  val fpSchd   = Module(new AnsScheduler(params, AnsIssueParams.fpScheduler))
+  val memSchd  = Module(new AnsScheduler(params, AnsIssueParams.memScheduler))
+  val dataPath = Module(new AnsDataPath(params))
+  val exuBlock = Module(new AnsExuBlockStub(params))
+  val wbDp     = Module(new AnsWbDataPathStub(params))
+
+  val schedulers = Seq(
+    intSchd -> AnsIssueParams.intScheduler,
+    fpSchd  -> AnsIssueParams.fpScheduler,
+    memSchd -> AnsIssueParams.memScheduler,
+  )
+
+  val issueFlush = ctrlBlock.io.redirect
+  for ((schd, _) <- schedulers) {
+    schd.io.flush    := issueFlush
+    schd.io.ldCancel := 0.U.asTypeOf(schd.io.ldCancel)
   }
+  dataPath.io.flush := issueFlush
+  exuBlock.io.flush := issueFlush
+
+  // ---- Dispatch -> Scheduler ----
+  private var dpPort = 0
+  for {
+    (schd, sp) <- schedulers
+    p          <- 0 until sp.dispatchEnqPorts
+  } {
+    schd.io.fromDispatch(p).valid            := ctrlBlock.io.toIssueQueues(dpPort).valid
+    schd.io.fromDispatch(p).bits             := ctrlBlock.io.toIssueQueues(dpPort).bits
+    ctrlBlock.io.toIssueQueues(dpPort).ready := schd.io.fromDispatch(p).ready
+    dpPort += 1
+  }
+  require(dpPort == AnsDispatchParams.IQEnqSum, "dispatch port accounting mismatch")
+
+  // ---- 各出队口有效条目数（按全局 exuIdx） ----
+  ctrlBlock.io.IQValidNumVec := 0.U.asTypeOf(ctrlBlock.io.IQValidNumVec)
+  private var iqExuPort = 0
+  for {
+    (schd, sp) <- schedulers
+    iq         <- sp.iqs
+    exu        <- iq.exus
+  } {
+    ctrlBlock.io.IQValidNumVec(exu.exuIdx) := schd.io.IQValidNumVec(exu.exuIdx)
+    iqExuPort += 1
+  }
+  require(iqExuPort == AnsIssueParams.nExu, "IQ valid-count exu accounting mismatch")
+
+  // ---- IQ 唤醒总线：全局合流后统一打一拍，避免组合环 ----
+  val wakeupRaw = Wire(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
+  for (e <- 0 until AnsIssueParams.nExu) {
+    val cands = schedulers.map(_._1.io.wakeupOut(e))
+    wakeupRaw(e).valid := VecInit(cands.map(_.valid)).asUInt.orR
+    wakeupRaw(e).bits  := Mux(cands(0).valid, cands(0).bits, Mux(cands(1).valid, cands(1).bits, cands(2).bits))
+  }
+  val wakeupReg = Reg(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
+  for (e <- 0 until AnsIssueParams.nExu) {
+    wakeupReg(e).valid := wakeupRaw(e).valid && !AnsIssueUtils.needFlush(wakeupRaw(e).bits.robIdx, issueFlush)
+    wakeupReg(e).bits  := wakeupRaw(e).bits
+  }
+  for ((schd, _) <- schedulers) {
+    schd.io.wakeupIn := wakeupReg
+  }
+
+  // ---- 唤醒 / 写回 -> Dispatch ----
+  val dispatchWakeup = Wire(new AnsIQWakeUpVec(params))
+  dispatchWakeup         := 0.U.asTypeOf(dispatchWakeup)
+  for ((exuIdx, k) <- AnsIssueParams.intWakeUpExuIdx.zipWithIndex) {
+    val w = wakeupReg(exuIdx)
+    dispatchWakeup.wakeUpInt(k).valid       := w.valid
+    dispatchWakeup.wakeUpInt(k).bits.rfWen  := w.bits.intWen
+    dispatchWakeup.wakeUpInt(k).bits.fpWen  := w.bits.fpWen
+    dispatchWakeup.wakeUpInt(k).bits.pdest  := w.bits.pdest
+    dispatchWakeup.wakeUpInt(k).bits.rcDest := w.bits.rcDest
+    dispatchWakeup.wakeUpInt(k).bits.is0Lat := w.bits.is0Lat
+  }
+  for ((exuIdx, k) <- AnsIssueParams.fpWakeUpExuIdx.zipWithIndex) {
+    val w = wakeupReg(exuIdx)
+    dispatchWakeup.wakeUpFp(k).valid       := w.valid
+    dispatchWakeup.wakeUpFp(k).bits.rfWen  := w.bits.intWen
+    dispatchWakeup.wakeUpFp(k).bits.fpWen  := w.bits.fpWen
+    dispatchWakeup.wakeUpFp(k).bits.pdest  := w.bits.pdest
+    dispatchWakeup.wakeUpFp(k).bits.rcDest := w.bits.rcDest
+    dispatchWakeup.wakeUpFp(k).bits.is0Lat := w.bits.is0Lat
+  }
+  ctrlBlock.io.wakeUpAll := dispatchWakeup
+
+  for ((schd, _) <- schedulers) {
+    schd.io.intWriteBack := wbDp.io.intWriteBack
+    schd.io.fpWriteBack  := wbDp.io.fpWriteBack
+  }
+
+  for (k <- 0 until AnsDispatchParams.nIntWb) {
+    ctrlBlock.io.wbPregsInt(k).valid := wbDp.io.intWriteBack(k).wen
+    ctrlBlock.io.wbPregsInt(k).bits  := wbDp.io.intWriteBack(k).addr
+  }
+  for (k <- 0 until AnsDispatchParams.nFpWb) {
+    ctrlBlock.io.wbPregsFp(k).valid := wbDp.io.fpWriteBack(k).wen
+    ctrlBlock.io.wbPregsFp(k).bits  := wbDp.io.fpWriteBack(k).addr
+  }
+
+  ctrlBlock.io.s0Cancel := dataPath.io.toIq.s0Cancel
+  ctrlBlock.io.ldCancel := 0.U.asTypeOf(ctrlBlock.io.ldCancel)
+
+  // ---- Scheduler <-> DataPath ----
+  for ((schd, sp) <- schedulers) {
+    schd.io.fromDataPath    := dataPath.io.toIq
+    schd.io.wbBusyTableRead := 0.U.asTypeOf(schd.io.wbBusyTableRead)
+    sp.deqExuIdx.zipWithIndex.foreach { case (e, k) =>
+      dataPath.io.fromIQ(e).valid     := schd.io.deq(k).valid
+      dataPath.io.fromIQ(e).bits      := schd.io.deq(k).bits
+      schd.io.deq(k).ready            := dataPath.io.fromIQ(e).ready
+      schd.io.wbBusyTableRead(e)      := dataPath.io.wbBusyTableRead(e)
+      dataPath.io.wbBusyTableWrite(e) := schd.io.wbBusyTableWrite(e)
+    }
+  }
+
+  // ---- DataPath <-> EXU / WbDataPath 占位 ----
+  for (e <- 0 until AnsIssueParams.nExu) {
+    exuBlock.io.in(e).valid    := dataPath.io.toExu(e).valid
+    exuBlock.io.in(e).bits     := dataPath.io.toExu(e).bits
+    dataPath.io.toExu(e).ready := exuBlock.io.in(e).ready
+  }
+  dataPath.io.exuOutput    := exuBlock.io.out
+  dataPath.io.intWriteBack := wbDp.io.intWriteBack
+  dataPath.io.fpWriteBack  := wbDp.io.fpWriteBack
+  wbDp.io.fromExu          := exuBlock.io.out
+
+  // PC 镜像：前端进入 Decode 的第一个槽位按 ftqPtr 更新（RVC 下需改为按实际槽位）。
+  val pcWrite = Wire(new AnsPcMemWrite(params))
+  pcWrite.wen            := io.in(0).valid && ctrlBlock.io.in(0).ready
+  pcWrite.ftqPtr         := io.in(0).bits.ftqPtr
+  pcWrite.pc             := io.in(0).bits.pc
+  pcWrite.target         := io.in(0).bits.pc + 4.U
+  dataPath.io.pcMemWrite := pcWrite
 
   // TODO: 用真实 LSQ 替换；当前永远可入队、返回全 0 lq/sq 索引。
   ctrlBlock.io.lsqEnq.canAccept := true.B
   ctrlBlock.io.lsqEnq.resp      := 0.U.asTypeOf(ctrlBlock.io.lsqEnq.resp)
-
-  // TODO: 用 Scheduler / DataPath / MemBlock 的真实反馈替换。
-  ctrlBlock.io.IQValidNumVec := 0.U.asTypeOf(ctrlBlock.io.IQValidNumVec)
-  ctrlBlock.io.wbPregsInt    := 0.U.asTypeOf(ctrlBlock.io.wbPregsInt)
-  ctrlBlock.io.wbPregsFp     := 0.U.asTypeOf(ctrlBlock.io.wbPregsFp)
-  ctrlBlock.io.wakeUpAll     := 0.U.asTypeOf(ctrlBlock.io.wakeUpAll)
-  ctrlBlock.io.s0Cancel      := 0.U.asTypeOf(ctrlBlock.io.s0Cancel)
-  ctrlBlock.io.ldCancel      := 0.U.asTypeOf(ctrlBlock.io.ldCancel)
-  ctrlBlock.io.fromMem       := 0.U.asTypeOf(ctrlBlock.io.fromMem)
+  ctrlBlock.io.fromMem          := 0.U.asTypeOf(ctrlBlock.io.fromMem)
 
   // ---- debug mirrors ----
   io.debug.t1Valid       := ctrlBlock.io.debug.t1Valid

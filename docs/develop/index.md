@@ -68,6 +68,22 @@ Reg(io.my_signal)      // WRONG! Creates a Reg of the same type as io.a, this wi
 val lotsOfRegs = RegInit(VecInit(10, UInt(32.W)))
 ```
 
+### 补充 3：Module 内禁止 `private val` 和 `private def`
+
+在 Chisel `Module`（含 `RawModule`、`MultiIOModule`、`BlackBox` 等子类）内部声明的所有 `val`、`def` 成员——包括信号、寄存器、子模块、参数、局部常量和辅助方法——一律直接使用 `val`/`def`，禁止声明为 `private val`/`private def`。
+
+`private` 是 Scala 的访问控制，不会改变 Chisel 的硬件语义，模块边界始终由 `io` 决定；在 Module 内使用 `private` 只会让内部信号、子模块和辅助方法无法被父模块或测试观察，增加无意义的修饰噪声。
+
+```scala
+val issueValid = Wire(Bool())             // good
+private val issueValid = Wire(Bool())     // forbidden in Module
+
+def toMask(ports: Vec[Valid[UInt]]): UInt = ...
+private def toMask(ports: Vec[Valid[UInt]]): UInt = ...  // forbidden in Module
+```
+
+该约束仅针对 Module：普通 Scala `class`/`object`、`Bundle`、测试套件中的 `private val`/`private def` 不受限制。
+
 ## C/C++ 语法风格
 
 对于 C/C++ 语言，AnserCore 项目将会使用 Clang 格式化工具的 LLVM 预设风格。

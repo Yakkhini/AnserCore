@@ -38,6 +38,10 @@ object Bundles {
     instructionWidth:    Int = 32,
     /** Number of register-like source operands / 类寄存器源操作数数量. */
     numSrc:              Int = 3,
+    /** Integer source slots per lane; scalar int instructions have at most 2. */
+    numIntSrc:           Int = 2,
+    /** FP source slots per lane; only FP FMA needs 3 (numSrc defaults to 3). */
+    numFpSrc:            Int = 3,
     /** Instructions grouped in one frontend block / 一个前端 block 中的指令数量. */
     fetchWidth:          Int = 4,
     /** Fetch slots per FTQ entry; default matches 4 lanes with two halfword slots per lane. */
@@ -63,7 +67,7 @@ object Bundles {
     /** Maximum execution-unit latency represented by busy tables / busy 表可表示的最大执行延迟. */
     maxLatency:          Int = 16,
     /** Maximum execution units addressable by a source code. 源选择编码可寻址的最大执行单元数。 */
-    maxExuCount:         Int = 8,
+    maxExuCount:         Int = 16,
     /** Maximum number of replicated wakeup destinations / 唤醒复制目的端的最大数量. */
     maxWakeupCopies:     Int = 2,
     /** Integer RegCache entries / 整数寄存器缓存条目数. */
@@ -75,6 +79,8 @@ object Bundles {
     require(pcWidth > 0, "pcWidth must be positive")
     require(instructionWidth > 0, "instructionWidth must be positive")
     require(numSrc > 0, "numSrc must be positive")
+    require(numIntSrc > 0 && numIntSrc <= numSrc, "numIntSrc must be in (0, numSrc]")
+    require(numFpSrc > 0 && numFpSrc <= numSrc, "numFpSrc must be in (0, numSrc]")
     require(fetchWidth > 0, "fetchWidth must be positive")
     require(predictWidth >= fetchWidth, "predictWidth must cover at least one slot per fetch lane")
     require(ftqEntries > 1, "ftqEntries must be greater than one")
@@ -223,14 +229,34 @@ object Bundles {
     def isReady(state: UInt): Bool = state === ready.U
   }
 
+  /* Where an operand comes from at dequeue time / 出队时操作数的来源.
+   * Bit 3 marks a "registered" source (PRF or RegCache) that needs a physical
+   * read port; the remaining bits select the datum. The encoding follows the
+   * scalar backend reference so the IQ and DataPath agree on decay order.
+   */
   object DataSource {
-    val width        = 2
-    val registerFile = 0
-    val immediate    = 1
+    val width        = 4
+    val zero         = 0
+    val forward      = 1
     val bypass       = 2
-    val constant     = 3
+    val bypass2      = 3
+    val immediate    = 4
+    val regCache     = 6
+    val registerFile = 8
+
+    /** Legacy names kept for the decode-side helper below. */
+    val constant = zero
 
     def apply(): UInt = UInt(width.W)
+
+    def readReg(source:      UInt): Bool = source(3)
+    def readRegOH(source:    UInt): Bool = source === registerFile.U
+    def readRegCache(source: UInt): Bool = source === regCache.U
+    def readForward(source:  UInt): Bool = source === forward.U
+    def readBypass(source:   UInt): Bool = source === bypass.U
+    def readBypass2(source:  UInt): Bool = source === bypass2.U
+    def readImm(source:      UInt): Bool = source === immediate.U
+    def readZero(source:     UInt): Bool = source === zero.U
   }
 
   /* Functional-unit class of an instruction.
@@ -1226,10 +1252,13 @@ object Bundles {
       UInt(params.loadDependencyWidth.W),
     )
     val isZeroLatency  = Bool()
-    val copyValid      = Bool()
-    val copyDest       = Vec(math.max(copyNum, 1), UInt(params.physicalRegWidth.W))
-    val copyIntWen     = Vec(math.max(copyNum, 1), Bool())
-    val copyFpWen      = Vec(math.max(copyNum, 1), Bool())
+
+    /** Register-cache slot reserved for this result; consumed by dispatch tag table. */
+    val rcDest     = UInt(params.regCacheIndexWidth.W)
+    val copyValid  = Bool()
+    val copyDest   = Vec(math.max(copyNum, 1), UInt(params.physicalRegWidth.W))
+    val copyIntWen = Vec(math.max(copyNum, 1), Bool())
+    val copyFpWen  = Vec(math.max(copyNum, 1), Bool())
 
     def fromExuInput(exuInput: ExuInput): Unit = {
       intWen         := exuInput.intWen
@@ -1245,9 +1274,14 @@ object Bundles {
     val needed = Bool()
   }
 
-  /** One issue-queue entry response / 一个发射队列条目的响应. */
+  /** One issue-queue entry response / 一个发射队列条目的响应.
+    *
+    * `ready = 0` means the instruction was blocked at this pipeline stage and must re-issue. `fuType` is echoed back so
+    * busy tables can release the correct slot.
+    */
   class IssueEntryResponse(val params: BundleParams = BundleParams()) extends Bundle {
     val robIdx = UInt(params.robIndexWidth.W)
+    val fuType = FuType()
     val ready  = Bool()
   }
 
@@ -1262,12 +1296,15 @@ object Bundles {
     val srcType     = Vec(exuParams.numRegSrc, SrcType())
     val regCacheIdx = Vec(
       exuParams.numRegSrc,
-      UInt(params.physicalRegWidth.W),
+      UInt(params.regCacheIndexWidth.W),
     )
     val immType     = ImmType()
-    val common      = new ExuInput(params, exuParams)
-    val addrOH      = UInt(issueParams.numEntries.W)
-    val issueValid  = Bool()
+
+    /** Physical source addresses used by DataPath for the PRF read ports. */
+    val psrc       = Vec(exuParams.numRegSrc, UInt(params.physicalRegWidth.W))
+    val common     = new ExuInput(params, exuParams)
+    val addrOH     = UInt(issueParams.numEntries.W)
+    val issueValid = Bool()
 
     def exuIdx: Int = exuParams.exuIdx
 
@@ -1289,10 +1326,14 @@ object Bundles {
     val exuParams: ExecutionUnitParams,
     val params:    BundleParams = BundleParams(),
   ) extends Bundle {
-    val intWbBusyTable = UInt(widthFor(exuParams.intLatency + 1).W)
-    val fpWbBusyTable  = UInt(widthFor(exuParams.fpLatency + 1).W)
-    val intDeqRespSet  = Bool()
-    val fpDeqRespSet   = Bool()
+
+    /** Slot-reservation vector, indexed by latency; the last bit is never used. */
+    val intWbBusyTable = UInt((params.maxLatency + 1).W)
+    val fpWbBusyTable  = UInt((params.maxLatency + 1).W)
+
+    /** Latency vector of the instruction dequeued this cycle (one-hot bit at its latency). */
+    val intDeqRespSet = UInt((params.maxLatency + 1).W)
+    val fpDeqRespSet  = UInt((params.maxLatency + 1).W)
   }
 
   /** Busy-table read payload / busy 表读取接口. */
@@ -1300,8 +1341,8 @@ object Bundles {
     val exuParams: ExecutionUnitParams,
     val params:    BundleParams = BundleParams(),
   ) extends Bundle {
-    val intWbBusyTable = UInt(widthFor(exuParams.intLatency + 1).W)
-    val fpWbBusyTable  = UInt(widthFor(exuParams.fpLatency + 1).W)
+    val intWbBusyTable = UInt((params.maxLatency + 1).W)
+    val fpWbBusyTable  = UInt((params.maxLatency + 1).W)
   }
 
   /** Writeback conflict flags / 写回冲突标志. */
