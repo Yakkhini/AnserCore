@@ -4,20 +4,24 @@
  * SPDX-License-Identifier: MulanPSL-2.0
  */
 
-#include "VAnserCore.h"
-#include "verilated.h"
+#include "session/options.h"
+#include "session/session.h"
 
-int main(int argc, char **argv) {
-  VerilatedContext *contextp = new VerilatedContext;
-  contextp->commandArgs(argc, argv);
+int main(int argc, char** argv) {
+  OptionSet options;
+  register_platform_options(options);
 
-  VAnserCore *top = new VAnserCore{contextp};
-
-  while (!contextp->gotFinish()) {
-    top->eval();
+  ParseStatus parsed = options.parse(argc, argv);
+  if (parsed == ParseStatus::Help) {
+    options.print(argc > 0 ? argv[0] : "sim");
+    return 0;
+  }
+  if (parsed == ParseStatus::Error) {
+    return 1;
   }
 
-  delete top;
-  delete contextp;
-  return 0;
+  Session session(argc, argv);
+  session.run();
+  session.finish();
+  return session.state() != SessionState::kNormal;
 }
