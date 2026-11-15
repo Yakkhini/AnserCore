@@ -10,10 +10,11 @@
 int main(int argc, char** argv) {
   OptionSet options;
   register_platform_options(options);
+  register_service_options(options);
 
   ParseStatus parsed = options.parse(argc, argv);
   if (parsed == ParseStatus::Help) {
-    options.print(argc > 0 ? argv[0] : "sim");
+    options.print(argv[0]);
     return 0;
   }
   if (parsed == ParseStatus::Error) {

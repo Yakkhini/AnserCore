@@ -10,6 +10,7 @@
 
 #include "VTop.h"
 #include "platform/platform.h"
+#include "service/lightsss/lightsss.h"
 #include "session/options.h"
 
 #if defined(EMU_TRACE_FST)
@@ -33,9 +34,14 @@ struct Config {
 
 Config config;
 
+class VerilatorPlatform;
+
+VerilatorPlatform* current_platform = nullptr;
+
 class VerilatorPlatform final : public Platform {
  public:
   VerilatorPlatform(Config parsed, int argc, char** argv);
+  ~VerilatorPlatform() override;
 
   void tick() override;
   bool get_finsh() override { return context_->gotFinish(); }
@@ -43,13 +49,15 @@ class VerilatorPlatform final : public Platform {
   void finish() override {
     std::printf("simulation time: %" PRIu64 "\n", context_->time());
   }
+  void open_requested_waveform();
+  void at_clone() { dut_->atClone(); }
 
  private:
   Config config_;
   std::unique_ptr<VerilatedContext> context_;
   std::unique_ptr<VTop> dut_;
 #if defined(EMU_HAS_TRACE)
-  bool open_waveform();
+  bool open_waveform_file();
   std::unique_ptr<TraceFile> waveform_;
 #endif
 };
@@ -65,10 +73,8 @@ VerilatorPlatform::VerilatorPlatform(Config parsed, int argc, char** argv)
 #endif
   dut_ = std::make_unique<VTop>(context_.get());
 #if defined(EMU_HAS_TRACE)
-  if (config_.dump_wave) {
-    if (!open_waveform()) {
-      throw std::runtime_error("cannot open waveform file");
-    }
+  if (config_.dump_wave && !lightsss_enabled()) {
+    open_requested_waveform();
   }
 #endif
 
@@ -77,6 +83,24 @@ VerilatorPlatform::VerilatorPlatform(Config parsed, int argc, char** argv)
     tick();
   }
   dut_->reset = 0;
+  current_platform = this;
+}
+
+VerilatorPlatform::~VerilatorPlatform() {
+  if (current_platform == this) {
+    current_platform = nullptr;
+  }
+}
+
+void VerilatorPlatform::open_requested_waveform() {
+#if defined(EMU_HAS_TRACE)
+  if (!config_.dump_wave || waveform_) {
+    return;
+  }
+  if (!open_waveform_file()) {
+    throw std::runtime_error("cannot open waveform file");
+  }
+#endif
 }
 
 void VerilatorPlatform::tick() {
@@ -102,7 +126,7 @@ void VerilatorPlatform::tick() {
 }
 
 #if defined(EMU_HAS_TRACE)
-bool VerilatorPlatform::open_waveform() {
+bool VerilatorPlatform::open_waveform_file() {
   std::string path = config_.wave_path;
   if (path.empty()) {
 #if defined(EMU_TRACE_FST)
@@ -123,6 +147,18 @@ bool VerilatorPlatform::open_waveform() {
 #endif
 
 }  // namespace
+
+void open_waveform() {
+  if (current_platform != nullptr) {
+    current_platform->open_requested_waveform();
+  }
+}
+
+void at_clone() {
+  if (current_platform != nullptr) {
+    current_platform->at_clone();
+  }
+}
 
 void register_platform_options(OptionSet& options) {
   config = Config{};

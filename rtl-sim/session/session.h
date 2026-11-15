@@ -2,8 +2,10 @@
 #define SIM_SESSION_SESSION_H
 
 #include <memory>
+#include <vector>
 
 #include "platform/platform.h"
+#include "service/service.h"
 
 enum class SessionState {
   kRunning,
@@ -22,6 +24,7 @@ class Session {
  private:
   SessionState state_;
   std::unique_ptr<Platform> platform_;
+  std::vector<std::unique_ptr<SimService>> services_;
 };
 
 #endif
