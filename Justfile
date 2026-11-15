@@ -10,7 +10,8 @@ BUILD_DIR := "$PRJ_ROOT/out"
 INC_DIR := "$PRJ_ROOT/rtl-sim/include"
 CONFIG_DIR := "$PRJ_ROOT/rtl-sim/config"
 NPC_NAME := "AnserCore"
-DRAMSIM3_HOME := env_var_or_default("DRAMSIM3_HOME", "/home/yang/work/AnserCore/rtl-sim/third_party/DRAMsim3")
+# XiangShan's co-simulation fork. `just dramsim3` clones and builds it.
+DRAMSIM3_HOME := env_var_or_default("DRAMSIM3_HOME", justfile_directory() + "/third_party/DRAMsim3")
 DRAMSIM3_LIB := DRAMSIM3_HOME + "/build/libdramsim3.a"
 
 # GCC is the default. The Clang set is:
@@ -24,12 +25,25 @@ SIM_LINK := "g++"
 SIM_AR := "ar"
 SIM_ARGS := ""
 
+# Clone OpenXiangShan/DRAMsim3 and build the static library.
+dramsim3:
+    #!/usr/bin/env zsh
+    set -euo pipefail
+    home={{DRAMSIM3_HOME}}
+    if [[ ! -f $home/src/cosimulation.h ]]; then
+        mkdir -p "$(dirname $home)"
+        git clone --depth 1 --branch co-simulation \
+            https://github.com/OpenXiangShan/DRAMsim3.git "$home"
+    fi
+    cmake -S "$home" -B "$home/build" -DCOSIM=ON -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$home/build" --target dramsim3 -j "$NIX_BUILD_CORES"
+
 sv:
     #!/usr/bin/env zsh
     mill -i ansercore.run
     echo "SystemVerilog files are generated."
 
-_compile target: sv
+_compile target: dramsim3 sv
     #!/usr/bin/env zsh
     mkdir -p {{BUILD_DIR}}/bin
     mkdir -p {{BUILD_DIR}}/verilator
