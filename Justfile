@@ -52,6 +52,7 @@ _compile target: dramsim3 sv
         $PRJ_ROOT/rtl-sim/platform
         $PRJ_ROOT/rtl-sim/service
         $PRJ_ROOT/rtl-sim/session
+        $PRJ_ROOT/rtl-sim/dpi-c
     )
     csrc=($PRJ_ROOT/rtl-sim/main.cc)
     found=$(find $csrc_dirs \( -name '*.cc' -o -name '*.cpp' \))
@@ -103,6 +104,7 @@ _compile target: dramsim3 sv
     ld_flags=(
         -flto
         {{DRAMSIM3_LIB}}
+        -ldl
         -pthread
     )
     cflags=()
@@ -117,7 +119,10 @@ _compile target: dramsim3 sv
     verilator $verilator_flags $cflags $ldflags $vltsrc $csrc $vsrc
     make -C {{BUILD_DIR}}/verilator/{{target}} -f VTop.mk -j $NIX_BUILD_CORES CXX={{SIM_CXX}} LINK={{SIM_LINK}} AR={{SIM_AR}}
 
-core-sim: (_compile "AnserCore")
+# Build the simulator only. `core-sim` runs the binary produced here.
+compile: (_compile "AnserCore")
+
+core-sim: compile
     {{BUILD_DIR}}/bin/ansercore {{SIM_ARGS}}
 
 clean:

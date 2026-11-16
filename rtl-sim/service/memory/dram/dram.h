@@ -9,9 +9,9 @@ class DramModel {
  public:
   virtual ~DramModel() = default;
   virtual bool accept(uint64_t address, bool is_write) = 0;
-  virtual bool request(uint64_t address, bool is_write) = 0;
+  virtual bool request(uint64_t address, bool is_write, uint32_t id) = 0;
   virtual void tick() = 0;
-  virtual bool complete(bool is_write, uint64_t* address) = 0;
+  virtual bool complete(bool is_write, uint32_t* id) = 0;
 };
 
 std::unique_ptr<DramModel> create_dram(const std::string& ini,

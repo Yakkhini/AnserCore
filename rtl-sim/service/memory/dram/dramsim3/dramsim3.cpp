@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -14,33 +15,42 @@ class DramSim3Model final : public DramModel {
   bool accept(uint64_t address, bool is_write) override {
     return model_->will_accept(address, is_write);
   }
-  bool request(uint64_t address, bool is_write) override;
+  bool request(uint64_t address, bool is_write, uint32_t id) override;
   void tick() override { model_->tick(); }
-  bool complete(bool is_write, uint64_t* address) override;
+  bool complete(bool is_write, uint32_t* id) override;
 
  private:
   std::unique_ptr<CoDRAMsim3> model_;
 };
 
-bool DramSim3Model::request(uint64_t address, bool is_write) {
+struct DramMeta {
+  uint32_t id;
+};
+
+bool DramSim3Model::request(uint64_t address, bool is_write, uint32_t id) {
   if (!model_->will_accept(address, is_write)) {
     return false;
   }
-  auto* dram_request = new CoDRAMRequest(address, is_write, nullptr);
+  auto* meta = new DramMeta;
+  meta->id = id;
+  auto* dram_request = new CoDRAMRequest(address, is_write, meta);
   if (!model_->add_request(dram_request)) {
+    delete meta;
     delete dram_request;
     return false;
   }
   return true;
 }
 
-bool DramSim3Model::complete(bool is_write, uint64_t* address) {
+bool DramSim3Model::complete(bool is_write, uint32_t* id) {
   CoDRAMResponse* response =
       is_write ? model_->check_write_response() : model_->check_read_response();
   if (response == nullptr) {
     return false;
   }
-  *address = response->req->address;
+  auto* meta = static_cast<DramMeta*>(response->req->meta);
+  *id = meta->id;
+  delete meta;
   delete response->req;
   delete response;
   return true;

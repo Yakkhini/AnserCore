@@ -1,9 +1,26 @@
 #include "session/session.h"
 
+namespace {
+
+Session* current_session = nullptr;
+
+}  // namespace
+
 Session::Session(int argc, char** argv)
     : state_(SessionState::kNormal),
-      platform_(create_platform(argc, argv)),
-      services_(create_services()) {}
+      dpi_(create_dpi()),
+      services_(create_services()),
+      platform_(create_platform(argc, argv)) {
+  current_session = this;
+}
+
+Session::~Session() { current_session = nullptr; }
+
+void session_fail() {
+  if (current_session != nullptr) {
+    current_session->state_ = SessionState::kError;
+  }
+}
 
 void Session::run() {
   state_ = SessionState::kRunning;

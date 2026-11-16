@@ -3,13 +3,13 @@
 #include <sys/stat.h>
 
 #include <cerrno>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
-#include <vector>
 
 #include "service/memory/dram/dram.h"
 #include "session/options.h"
@@ -17,8 +17,11 @@
 namespace {
 
 MemoryConfig config;
+MemoryService* current = nullptr;
 
 }  // namespace
+
+MemoryService* current_memory() { return current; }
 
 MemoryService::MemoryService(MemoryConfig parsed) : config_(std::move(parsed)) {
   check_config();
@@ -31,6 +34,7 @@ MemoryService::MemoryService(MemoryConfig parsed) : config_(std::move(parsed)) {
     throw std::runtime_error("failed to load image " + config_.image);
   }
   dram_ = create_dram(config_.ini, config_.outdir);
+  current = this;
 }
 
 void MemoryService::check_config() {
@@ -118,11 +122,102 @@ bool MemoryService::load_image() {
   return got == static_cast<size_t>(size);
 }
 
-MemoryService::~MemoryService() = default;
+MemoryService::~MemoryService() {
+  if (current == this) {
+    current = nullptr;
+  }
+}
+
+bool MemoryService::word_index(uint64_t offset, uint64_t* index) const {
+  if (words_.empty() || offset % 8 != 0) {
+    return false;
+  }
+  uint64_t word = offset / 8;
+  if (word >= words_.size()) {
+    return false;
+  }
+  *index = word;
+  return true;
+}
+
+void MemoryService::write_word(uint64_t offset, uint64_t data,
+                               unsigned char strobe) {
+  uint64_t index = 0;
+  if (offset % 8 != 0) {
+    std::fprintf(stderr, "memory write is not 8-byte aligned: offset 0x%" PRIx64 "\n",
+                 offset);
+    failed_ = true;
+    return;
+  }
+  if (!word_index(offset, &index)) {
+    std::fprintf(stderr, "memory write out of range: offset 0x%" PRIx64 "\n",
+                 offset);
+    failed_ = true;
+    return;
+  }
+  uint64_t mask = 0;
+  for (int byte = 0; byte < 8; ++byte) {
+    if ((strobe & (1u << byte)) != 0) {
+      mask |= 0xffull << (8 * byte);
+    }
+  }
+  words_[static_cast<size_t>(index)] =
+      (words_[static_cast<size_t>(index)] & ~mask) | (data & mask);
+}
+
+uint64_t MemoryService::read_word(uint64_t offset) {
+  uint64_t index = 0;
+  if (offset % 8 != 0) {
+    std::fprintf(stderr, "memory read is not 8-byte aligned: offset 0x%" PRIx64 "\n",
+                 offset);
+    failed_ = true;
+    return 0;
+  }
+  if (!word_index(offset, &index)) {
+    std::fprintf(stderr, "memory read out of range: offset 0x%" PRIx64 "\n",
+                 offset);
+    failed_ = true;
+    return 0;
+  }
+  return words_[static_cast<size_t>(index)];
+}
+
+unsigned char MemoryService::accept(uint64_t offset, unsigned int id,
+                                    unsigned char is_write) {
+  constexpr uint64_t kLineBytes = 64;
+  uint64_t bytes = static_cast<uint64_t>(words_.size()) * 8ull;
+  if (offset % kLineBytes != 0) {
+    std::fprintf(stderr,
+                 "memory request is not 64-byte aligned: offset 0x%" PRIx64 "\n",
+                 offset);
+    failed_ = true;
+    return 0;
+  }
+  if (bytes < kLineBytes || offset > bytes - kLineBytes) {
+    std::fprintf(stderr, "memory request out of range: offset 0x%" PRIx64 "\n",
+                 offset);
+    failed_ = true;
+    return 0;
+  }
+  bool write = is_write != 0;
+  if (!dram_->accept(offset, write) ||
+      !dram_->request(offset, write, static_cast<uint32_t>(id))) {
+    return 0;
+  }
+  return 1;
+}
+
+uint64_t MemoryService::take_response(unsigned char is_write) {
+  uint32_t id = 0;
+  if (!dram_->complete(is_write != 0, &id)) {
+    return 0;
+  }
+  return static_cast<uint64_t>(id) | (1ull << 32);
+}
 
 bool MemoryService::on_posedge() {
   dram_->tick();
-  return true;
+  return !failed_;
 }
 
 void register_memory_options(OptionSet& options) {
