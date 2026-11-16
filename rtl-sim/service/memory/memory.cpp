@@ -33,26 +33,15 @@ MemoryService::MemoryService(MemoryConfig parsed) : config_(std::move(parsed)) {
   if (!load_image()) {
     throw std::runtime_error("failed to load image " + config_.image);
   }
+#ifdef EMU_DRAMSIM3
   dram_ = create_dram(config_.ini, config_.outdir);
+#else
+  dram_ = create_dram();
+#endif
   current = this;
 }
 
 void MemoryService::check_config() {
-  if (config_.ini.empty()) {
-    throw std::runtime_error("missing --dramsim3-ini");
-  }
-  FILE* file = std::fopen(config_.ini.c_str(), "r");
-  if (file == nullptr) {
-    throw std::runtime_error("cannot open DRAMSim3 config file " + config_.ini);
-  }
-  std::fclose(file);
-  if (config_.outdir.empty()) {
-    throw std::runtime_error("missing --dramsim3-outdir");
-  }
-  if (mkdir(config_.outdir.c_str(), 0755) != 0 && errno != EEXIST) {
-    throw std::runtime_error("cannot create DRAMSim3 output directory " +
-                             config_.outdir);
-  }
   if (config_.image.empty()) {
     throw std::runtime_error("missing --image");
   }
@@ -225,8 +214,10 @@ bool MemoryService::on_posedge() {
 }
 
 void register_memory_options(OptionSet& options) {
+#ifdef EMU_DRAMSIM3
   options.add("dramsim3-ini", &config.ini, "DRAMSim3 configuration file");
   options.add("dramsim3-outdir", &config.outdir, "DRAMSim3 output directory");
+#endif
   options.add("ram-size", &config.ram_size,
               "functional RAM size, for example 256MB (default 256MB)");
   options.add("image", &config.image,

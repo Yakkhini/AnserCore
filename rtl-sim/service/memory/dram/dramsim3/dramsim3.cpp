@@ -1,5 +1,12 @@
+#ifdef EMU_DRAMSIM3
+
+#include <sys/stat.h>
+
+#include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "cosimulation.h"
@@ -9,8 +16,7 @@ namespace {
 
 class DramSim3Model final : public DramModel {
  public:
-  DramSim3Model(const std::string& ini, const std::string& outdir)
-      : model_(std::make_unique<ComplexCoDRAMsim3>(ini, outdir)) {}
+  DramSim3Model(std::string ini, std::string outdir);
 
   bool accept(uint64_t address, bool is_write) override {
     return model_->will_accept(address, is_write);
@@ -26,6 +32,25 @@ class DramSim3Model final : public DramModel {
 struct DramMeta {
   uint32_t id;
 };
+
+DramSim3Model::DramSim3Model(std::string ini, std::string outdir) {
+  if (ini.empty()) {
+    throw std::runtime_error("missing --dramsim3-ini");
+  }
+  FILE* file = std::fopen(ini.c_str(), "r");
+  if (file == nullptr) {
+    throw std::runtime_error("cannot open DRAMSim3 config file " + ini);
+  }
+  std::fclose(file);
+  if (outdir.empty()) {
+    throw std::runtime_error("missing --dramsim3-outdir");
+  }
+  if (mkdir(outdir.c_str(), 0755) != 0 && errno != EEXIST) {
+    throw std::runtime_error("cannot create DRAMSim3 output directory " +
+                             outdir);
+  }
+  model_ = std::make_unique<ComplexCoDRAMsim3>(std::move(ini), std::move(outdir));
+}
 
 bool DramSim3Model::request(uint64_t address, bool is_write, uint32_t id) {
   if (!model_->will_accept(address, is_write)) {
@@ -62,3 +87,5 @@ std::unique_ptr<DramModel> create_dram(const std::string& ini,
                                        const std::string& outdir) {
   return std::make_unique<DramSim3Model>(ini, outdir);
 }
+
+#endif

@@ -24,6 +24,8 @@ SIM_CXX := "g++"
 SIM_LINK := "g++"
 SIM_AR := "ar"
 SIM_ARGS := ""
+# simple or dramsim3. dramsim3 defines EMU_DRAMSIM3.
+DRAM_BACKEND := env_var_or_default("DRAM_BACKEND", "simple")
 
 # Clone OpenXiangShan/DRAMsim3 and build the static library.
 dramsim3:
@@ -113,6 +115,9 @@ _compile target: softfloat dramsim3 sv
         -DCONFIG_TARGET_{{target}}
         -DEMU_TRACE_FST
     )
+    if [[ "{{DRAM_BACKEND}}" == "dramsim3" ]]; then
+        cxx_flags+=(-DEMU_DRAMSIM3)
+    fi
     for dir in $include_dirs; do
         cxx_flags+=(-I$dir)
     done

@@ -12,10 +12,12 @@ class DramModel;
 class OptionSet;
 
 struct MemoryConfig {
-  std::string ini;
-  std::string outdir;
   std::string ram_size = "256MB";
   std::string image;
+#ifdef EMU_DRAMSIM3
+  std::string ini;
+  std::string outdir;
+#endif
 };
 
 class MemoryService final : public SimService {
