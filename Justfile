@@ -38,12 +38,26 @@ dramsim3:
     cmake -S "$home" -B "$home/build" -DCOSIM=ON -DCMAKE_BUILD_TYPE=Release
     cmake --build "$home/build" --target dramsim3 -j "$NIX_BUILD_CORES"
 
+# Build the in-tree SoftFloat subset into out/lib/libsoftfloat.a.
+softfloat:
+    #!/usr/bin/env zsh
+    set -euo pipefail
+    src=$PRJ_ROOT/rtl-sim/ext/softfloat
+    obj={{BUILD_DIR}}/softfloat
+    lib={{BUILD_DIR}}/lib/libsoftfloat.a
+    mkdir -p $obj {{BUILD_DIR}}/lib
+    find $obj -name '*.o' -delete
+    for file in $src/*.c; do
+        {{SIM_COMPILER}} -O3 -I$src -c $file -o $obj/${file:t:r}.o
+    done
+    {{SIM_AR}} rcs $lib $obj/*.o
+
 sv:
     #!/usr/bin/env zsh
     mill -i ansercore.run
     echo "SystemVerilog files are generated."
 
-_compile target: dramsim3 sv
+_compile target: softfloat dramsim3 sv
     #!/usr/bin/env zsh
     mkdir -p {{BUILD_DIR}}/bin
     mkdir -p {{BUILD_DIR}}/verilator
@@ -55,7 +69,7 @@ _compile target: dramsim3 sv
         $PRJ_ROOT/rtl-sim/dpi-c
     )
     csrc=($PRJ_ROOT/rtl-sim/main.cc)
-    found=$(find $csrc_dirs \( -name '*.cc' -o -name '*.cpp' \))
+    found=$(find $csrc_dirs \( -name '*.cc' -o -name '*.cpp' -o -name '*.c' \))
     if [[ -n $found ]]; then
         csrc+=(${(f)found})
     fi
@@ -87,6 +101,7 @@ _compile target: dramsim3 sv
         {{INC_DIR}}
         {{CONFIG_DIR}}
         {{DRAMSIM3_HOME}}/src
+        $PRJ_ROOT/rtl-sim/ext/softfloat
     )
     if [[ -n ${C_INCLUDE_PATH:-} ]]; then
         include_dirs+=($C_INCLUDE_PATH)
@@ -103,6 +118,7 @@ _compile target: dramsim3 sv
     done
     ld_flags=(
         -flto
+        {{BUILD_DIR}}/lib/libsoftfloat.a
         {{DRAMSIM3_LIB}}
         -ldl
         -pthread

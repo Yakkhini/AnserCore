@@ -4,8 +4,9 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "service/memory/memory.h"
 #include "session/options.h"
+
+extern "C" uint64_t memory_read(uint64_t offset);
 
 namespace {
 
@@ -274,7 +275,7 @@ bool Mmu::read_pte(const Pmp& pmp, uint64_t addr, uint64_t* pte) const {
   if (!pmp_ok(pmp, addr, 8, AccessType::kLoad, Priv::kSuper)) {
     return false;
   }
-  *pte = current_memory()->read_word(addr - kRamBase);
+  *pte = memory_read(addr - kRamBase);
   return true;
 }
 
