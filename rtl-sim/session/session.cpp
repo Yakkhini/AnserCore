@@ -8,8 +8,8 @@ Session* current_session = nullptr;
 
 Session::Session(int argc, char** argv)
     : state_(SessionState::kNormal),
-      dpi_(create_dpi()),
       services_(create_services()),
+      dpi_(create_dpi()),
       platform_(create_platform(argc, argv)) {
   current_session = this;
 }

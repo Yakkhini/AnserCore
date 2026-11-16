@@ -22,6 +22,7 @@ class Difftest final : public DpiModule {
 
   void isa_compare(const IsaState& dut);
   void copy_to_ref(const IsaState& dut);
+  void exec(uint64_t n);
 
  private:
   DifftestConfig config_;

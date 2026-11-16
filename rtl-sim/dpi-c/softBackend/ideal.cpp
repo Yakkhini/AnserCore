@@ -66,34 +66,31 @@ IsaState SoftBackend::isa_state() const {
     state.gpr[i] = ideal_gpr_read(&hart_, static_cast<uint8_t>(i));
     state.fpr[i] = hart_.fpr[i];
   }
-  for (unsigned i = 0; i < 16; ++i) {
-    state.pmpcfg[i] = hart_.csr.pmpcfg[i];
-    state.pmpaddr[i] = hart_.csr.pmpaddr[i];
-  }
-  state.fcsr = hart_.fpr.fcsr;
   state.pc = hart_.pc;
   state.priv = hart_.priv;
   state.mstatus = hart_.csr.mstatus;
-  state.medeleg = hart_.csr.medeleg;
-  state.mideleg = hart_.csr.mideleg;
-  state.mie = hart_.csr.mie;
-  state.mip = hart_.csr.mip;
-  state.mtvec = hart_.csr.mtvec;
-  state.mscratch = hart_.csr.mscratch;
+  state.sstatus = hart_.csr.mstatus &
+                  (kMstatusSie | kMstatusSpie | kMstatusSpp | kMstatusFs |
+                   kMstatusSum | kMstatusMxr | kMstatusUxl);
+  if ((hart_.csr.mstatus & kMstatusFs) == kMstatusFsDirty) {
+    state.sstatus |= kMstatusSd;
+  }
   state.mepc = hart_.csr.mepc;
-  state.mcause = hart_.csr.mcause;
-  state.mtval = hart_.csr.mtval;
-  state.mcounteren = hart_.csr.mcounteren;
-  state.mcountinhibit = hart_.csr.mcountinhibit;
-  state.mcycle = hart_.csr.mcycle;
-  state.minstret = hart_.csr.minstret;
-  state.stvec = hart_.csr.stvec;
-  state.scounteren = hart_.csr.scounteren;
-  state.sscratch = hart_.csr.sscratch;
   state.sepc = hart_.csr.sepc;
-  state.scause = hart_.csr.scause;
+  state.mtval = hart_.csr.mtval;
   state.stval = hart_.csr.stval;
+  state.mtvec = hart_.csr.mtvec;
+  state.stvec = hart_.csr.stvec;
+  state.mcause = hart_.csr.mcause;
+  state.scause = hart_.csr.scause;
   state.satp = hart_.csr.satp;
+  state.mip = hart_.csr.mip;
+  state.mie = hart_.csr.mie;
+  state.mscratch = hart_.csr.mscratch;
+  state.sscratch = hart_.csr.sscratch;
+  state.mideleg = hart_.csr.mideleg;
+  state.medeleg = hart_.csr.medeleg;
+  state.fcsr = hart_.fpr.fcsr;
   return state;
 }
 

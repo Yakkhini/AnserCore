@@ -119,7 +119,11 @@ bool MemoryService::load_image() {
       size == 0 ? 0
                 : std::fread(words_.data(), 1, static_cast<size_t>(size), file);
   std::fclose(file);
-  return got == static_cast<size_t>(size);
+  if (got != static_cast<size_t>(size)) {
+    return false;
+  }
+  image_bytes_ = static_cast<uint64_t>(size);
+  return true;
 }
 
 MemoryService::~MemoryService() {

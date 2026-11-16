@@ -34,6 +34,10 @@ class MemoryService final : public SimService {
   uint64_t read_word(uint64_t offset);
   // 0 means no response. Otherwise bit 32 is set and bits [31:0] are the id.
   uint64_t take_response(unsigned char is_write);
+  const uint8_t* image() const {
+    return reinterpret_cast<const uint8_t*>(words_.data());
+  }
+  uint64_t image_bytes() const { return image_bytes_; }
 
  private:
   void check_config();
@@ -43,6 +47,7 @@ class MemoryService final : public SimService {
 
   MemoryConfig config_;
   std::vector<uint64_t> words_;
+  uint64_t image_bytes_ = 0;
   std::unique_ptr<DramModel> dram_;
   bool failed_ = false;
 };

@@ -8,36 +8,31 @@
 // ABI a reference shared library must export. Field order is part of that ABI.
 enum { DIFFTEST_TO_DUT = 0, DIFFTEST_TO_REF = 1 };
 
+// Same fields as DiffArchCommit: xrf, frf, DiffCSR, pc. Read-only counters,
+// mhartid, PMP, and PMA are not part of this snapshot.
 struct IsaState {
   uint64_t gpr[32];
   uint64_t fpr[32];
-  uint64_t fcsr;
   uint64_t pc;
   uint64_t priv;
   uint64_t mstatus;
-  uint64_t medeleg;
-  uint64_t mideleg;
-  uint64_t mie;
-  uint64_t mip;
-  uint64_t mtvec;
-  uint64_t mscratch;
+  uint64_t sstatus;
   uint64_t mepc;
-  uint64_t mcause;
-  uint64_t mtval;
-  uint64_t mcounteren;
-  uint64_t mcountinhibit;
-  uint64_t mcycle;
-  uint64_t minstret;
-  uint64_t mhartid;
-  uint64_t stvec;
-  uint64_t scounteren;
-  uint64_t sscratch;
   uint64_t sepc;
-  uint64_t scause;
+  uint64_t mtval;
   uint64_t stval;
+  uint64_t mtvec;
+  uint64_t stvec;
+  uint64_t mcause;
+  uint64_t scause;
   uint64_t satp;
-  uint64_t pmpcfg[16];
-  uint64_t pmpaddr[16];
+  uint64_t mip;
+  uint64_t mie;
+  uint64_t mscratch;
+  uint64_t sscratch;
+  uint64_t mideleg;
+  uint64_t medeleg;
+  uint64_t fcsr;
 };
 
 // A constructed library has been dlopen'd and difftest_init has returned.

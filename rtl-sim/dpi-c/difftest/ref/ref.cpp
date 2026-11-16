@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "service/memory/memory.h"
+
 namespace {
 
 void* load_symbol(void* handle, const char* name) {
@@ -53,6 +55,9 @@ RefLibrary::RefLibrary(const std::string& path)
   }
   init();
   std::printf("difftest reference: %s\n", path.c_str());
+  MemoryService* memory = current_memory();
+  memcpy_(0x80000000ull, const_cast<uint8_t*>(memory->image()),
+          static_cast<size_t>(memory->image_bytes()), DIFFTEST_TO_REF);
 }
 
 RefLibrary::~RefLibrary() { dlclose(handle_); }

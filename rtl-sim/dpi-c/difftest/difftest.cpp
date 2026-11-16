@@ -1,5 +1,6 @@
 #include "dpi-c/difftest/difftest.h"
 
+#include <cassert>
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
@@ -22,31 +23,26 @@ struct Scalar {
 };
 
 const Scalar kScalars[] = {
-    {"fcsr", &IsaState::fcsr},
     {"pc", &IsaState::pc},
     {"priv", &IsaState::priv},
     {"mstatus", &IsaState::mstatus},
-    {"medeleg", &IsaState::medeleg},
-    {"mideleg", &IsaState::mideleg},
-    {"mie", &IsaState::mie},
-    {"mip", &IsaState::mip},
-    {"mtvec", &IsaState::mtvec},
-    {"mscratch", &IsaState::mscratch},
+    {"sstatus", &IsaState::sstatus},
     {"mepc", &IsaState::mepc},
-    {"mcause", &IsaState::mcause},
-    {"mtval", &IsaState::mtval},
-    {"mcounteren", &IsaState::mcounteren},
-    {"mcountinhibit", &IsaState::mcountinhibit},
-    {"mcycle", &IsaState::mcycle},
-    {"minstret", &IsaState::minstret},
-    {"mhartid", &IsaState::mhartid},
-    {"stvec", &IsaState::stvec},
-    {"scounteren", &IsaState::scounteren},
-    {"sscratch", &IsaState::sscratch},
     {"sepc", &IsaState::sepc},
-    {"scause", &IsaState::scause},
+    {"mtval", &IsaState::mtval},
     {"stval", &IsaState::stval},
+    {"mtvec", &IsaState::mtvec},
+    {"stvec", &IsaState::stvec},
+    {"mcause", &IsaState::mcause},
+    {"scause", &IsaState::scause},
     {"satp", &IsaState::satp},
+    {"mip", &IsaState::mip},
+    {"mie", &IsaState::mie},
+    {"mscratch", &IsaState::mscratch},
+    {"sscratch", &IsaState::sscratch},
+    {"mideleg", &IsaState::mideleg},
+    {"medeleg", &IsaState::medeleg},
+    {"fcsr", &IsaState::fcsr},
 };
 
 void note(std::vector<std::string>* bad, const char* name, uint64_t dut,
@@ -78,10 +74,6 @@ void print_state(const char* title, const IsaState& state) {
     std::fprintf(stderr, "  %-14s %016" PRIx64 "\n", scalar.name,
                  state.*(scalar.field));
   }
-  for (int i = 0; i < 16; ++i) {
-    std::fprintf(stderr, "  pmpcfg%-8d %016" PRIx64 "\n", i, state.pmpcfg[i]);
-    std::fprintf(stderr, "  pmpaddr%-7d %016" PRIx64 "\n", i, state.pmpaddr[i]);
-  }
 }
 
 }  // namespace
@@ -103,6 +95,8 @@ void Difftest::copy_to_ref(const IsaState& dut) {
   ref_->regcpy(&image, DIFFTEST_TO_REF);
 }
 
+void Difftest::exec(uint64_t n) { ref_->exec(n); }
+
 void Difftest::isa_compare(const IsaState& dut) {
   IsaState ref{};
   ref_->regcpy(&ref, DIFFTEST_TO_DUT);
@@ -114,10 +108,6 @@ void Difftest::isa_compare(const IsaState& dut) {
   }
   for (const Scalar& scalar : kScalars) {
     note(&bad, scalar.name, dut.*(scalar.field), ref.*(scalar.field));
-  }
-  for (int i = 0; i < 16; ++i) {
-    note_at(&bad, "pmpcfg%d", i, dut.pmpcfg[i], ref.pmpcfg[i]);
-    note_at(&bad, "pmpaddr%d", i, dut.pmpaddr[i], ref.pmpaddr[i]);
   }
   if (bad.empty()) {
     return;
@@ -147,69 +137,125 @@ std::unique_ptr<DpiModule> create_difftest() {
   return std::make_unique<Difftest>(config);
 }
 
-IsaState make_dut(const uint64_t gpr[32], const uint64_t fpr[32], uint64_t fcsr,
-                  uint64_t pc, uint64_t priv, uint64_t mstatus,
-                  uint64_t medeleg, uint64_t mideleg, uint64_t mie,
-                  uint64_t mip, uint64_t mtvec, uint64_t mscratch,
-                  uint64_t mepc, uint64_t mcause, uint64_t mtval,
-                  uint64_t mcounteren, uint64_t mcountinhibit, uint64_t mcycle,
-                  uint64_t minstret, uint64_t mhartid, uint64_t stvec,
-                  uint64_t scounteren, uint64_t sscratch, uint64_t sepc,
-                  uint64_t scause, uint64_t stval, uint64_t satp,
-                  const uint64_t pmpcfg[16], const uint64_t pmpaddr[16]) {
-  IsaState dut{};
-  std::memcpy(dut.gpr, gpr, sizeof(dut.gpr));
-  std::memcpy(dut.fpr, fpr, sizeof(dut.fpr));
-  dut.fcsr = fcsr;
-  dut.pc = pc;
-  dut.priv = priv;
-  dut.mstatus = mstatus;
-  dut.medeleg = medeleg;
-  dut.mideleg = mideleg;
-  dut.mie = mie;
-  dut.mip = mip;
-  dut.mtvec = mtvec;
-  dut.mscratch = mscratch;
-  dut.mepc = mepc;
-  dut.mcause = mcause;
-  dut.mtval = mtval;
-  dut.mcounteren = mcounteren;
-  dut.mcountinhibit = mcountinhibit;
-  dut.mcycle = mcycle;
-  dut.minstret = minstret;
-  dut.mhartid = mhartid;
-  dut.stvec = stvec;
-  dut.scounteren = scounteren;
-  dut.sscratch = sscratch;
-  dut.sepc = sepc;
-  dut.scause = scause;
-  dut.stval = stval;
-  dut.satp = satp;
-  std::memcpy(dut.pmpcfg, pmpcfg, sizeof(dut.pmpcfg));
-  std::memcpy(dut.pmpaddr, pmpaddr, sizeof(dut.pmpaddr));
-  return dut;
+namespace {
+
+constexpr int kCommitWidth = 1;
+constexpr int kCommitFields = 2;
+constexpr int kCsrWords = 19;
+constexpr int kArchWords =
+    kCommitWidth * kCommitFields + 32 + 32 + kCsrWords + 1;
+
+struct CommitSlot {
+  bool valid = false;
+  bool skip = false;
+};
+
+bool take_word(const uint64_t* words, int nwords, int* index, uint64_t* out) {
+  if (*index >= nwords) {
+    return false;
+  }
+  *out = words[*index];
+  *index += 1;
+  return true;
 }
 
-extern "C" void difftest_isa(
-    const uint64_t gpr[32], const uint64_t fpr[32], uint64_t fcsr, uint64_t pc,
-    uint64_t priv, uint64_t mstatus, uint64_t medeleg, uint64_t mideleg,
-    uint64_t mie, uint64_t mip, uint64_t mtvec, uint64_t mscratch,
-    uint64_t mepc, uint64_t mcause, uint64_t mtval, uint64_t mcounteren,
-    uint64_t mcountinhibit, uint64_t mcycle, uint64_t minstret,
-    uint64_t mhartid, uint64_t stvec, uint64_t scounteren, uint64_t sscratch,
-    uint64_t sepc, uint64_t scause, uint64_t stval, uint64_t satp,
-    const uint64_t pmpcfg[16], const uint64_t pmpaddr[16], unsigned char skip) {
-  if (current == nullptr) {
+void handle_arch_commit(const uint64_t* words, int nwords) {
+  if (nwords != kArchWords) {
+    std::fprintf(stderr, "DiffArchCommit has %d words, expected %d\n", nwords,
+                 kArchWords);
+    session_fail();
     return;
   }
-  IsaState dut =
-      make_dut(gpr, fpr, fcsr, pc, priv, mstatus, medeleg, mideleg, mie, mip,
-               mtvec, mscratch, mepc, mcause, mtval, mcounteren, mcountinhibit,
-               mcycle, minstret, mhartid, stvec, scounteren, sscratch, sepc,
-               scause, stval, satp, pmpcfg, pmpaddr);
+  int index = 0;
+  CommitSlot commits[kCommitWidth];
+  for (int slot = 0; slot < kCommitWidth; ++slot) {
+    uint64_t valid = 0;
+    uint64_t skip = 0;
+    if (!take_word(words, nwords, &index, &valid) ||
+        !take_word(words, nwords, &index, &skip)) {
+      session_fail();
+      return;
+    }
+    commits[slot].valid = valid != 0;
+    commits[slot].skip = skip != 0;
+  }
+
+  IsaState dut{};
+  for (int i = 0; i < 32; ++i) {
+    if (!take_word(words, nwords, &index, &dut.gpr[i])) {
+      session_fail();
+      return;
+    }
+  }
+  for (int i = 0; i < 32; ++i) {
+    if (!take_word(words, nwords, &index, &dut.fpr[i])) {
+      session_fail();
+      return;
+    }
+  }
+  uint64_t* csr[] = {
+      &dut.priv,     &dut.mstatus, &dut.sstatus, &dut.mepc,  &dut.sepc,
+      &dut.mtval,    &dut.stval,   &dut.mtvec,   &dut.stvec, &dut.mcause,
+      &dut.scause,   &dut.satp,    &dut.mip,     &dut.mie,   &dut.mscratch,
+      &dut.sscratch, &dut.mideleg, &dut.medeleg, &dut.fcsr,
+  };
+  static_assert(sizeof(csr) / sizeof(csr[0]) == kCsrWords, "csr count");
+  for (uint64_t* field : csr) {
+    if (!take_word(words, nwords, &index, field)) {
+      session_fail();
+      return;
+    }
+  }
+  if (!take_word(words, nwords, &index, &dut.pc)) {
+    session_fail();
+    return;
+  }
+
+  bool skip = false;
+  uint64_t steps = 0;
+  for (const CommitSlot& slot : commits) {
+    if (!slot.valid) {
+      continue;
+    }
+    if (slot.skip) {
+      skip = true;
+    } else {
+      steps += 1;
+    }
+  }
   if (skip) {
     current->copy_to_ref(dut);
     return;
   }
+  if (steps == 0) {
+    return;
+  }
+  current->exec(steps);
   current->isa_compare(dut);
+}
+
+struct ProbeHandler {
+  const char* name;
+  void (*handle)(const uint64_t* words, int nwords);
+};
+
+const ProbeHandler kHandlers[] = {
+    {"DiffArchCommit", handle_arch_commit},
+};
+
+}  // namespace
+
+extern "C" void difftest_probe_push(const char* name, const uint64_t* words,
+                                    int nwords) {
+  assert(current != nullptr);
+  assert(name != nullptr);
+  assert(words != nullptr);
+  for (const ProbeHandler& handler : kHandlers) {
+    if (std::strcmp(name, handler.name) == 0) {
+      handler.handle(words, nwords);
+      return;
+    }
+  }
+  std::fprintf(stderr, "unknown difftest probe %s\n", name);
+  assert(false);
 }

@@ -27,8 +27,9 @@ class Session {
 
  private:
   SessionState state_;
-  std::vector<std::unique_ptr<DpiModule>> dpi_;
+  // Memory must exist before difftest copies the loaded image into the ref.
   std::vector<std::unique_ptr<SimService>> services_;
+  std::vector<std::unique_ptr<DpiModule>> dpi_;
   std::unique_ptr<Platform> platform_;
 };
 
