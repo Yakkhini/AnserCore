@@ -43,18 +43,31 @@ class AnsSrcStatus(val params: BundleParams = BundleParams()) extends Bundle {
   val regCacheIdx = UInt(params.regCacheIndexWidth.W)
 }
 
+/** 发射后的 2 位饱和计数器编码；仅 data0/data1 选择响应。
+  *
+  * 计数仍经过 2（已超过响应窗口），到 saturated 停止；未发射时也使用 saturated。
+  */
+object AnsIssueTimer {
+  final val width     = 2
+  final val data0     = 0
+  final val data1     = 1
+  final val saturated = 3
+}
+
 /** 条目状态。 */
 class AnsEntryStatus(
   val params: BundleParams = BundleParams(),
   val iq:     AnsIssueQueueParams,
 ) extends Bundle {
-  val robIdx     = UInt(params.robIndexWidth.W)
-  val fuType     = FuType()
-  val srcStatus  = Vec(params.numSrc, new AnsSrcStatus(params))
-  val blocked    = Bool()
-  val issued     = Bool()
-  val firstIssue = Bool()
-  val issueTimer = UInt(2.W)
+  val robIdx    = UInt(params.robIndexWidth.W)
+  val fuType    = FuType()
+  val srcStatus = Vec(params.numSrc, new AnsSrcStatus(params))
+  val blocked   = Bool()
+  val issued    = Bool()
+
+  /** 曾经发射过；重试时仍为 true，与当前 issued 状态不同。 */
+  val hasIssued  = Bool()
+  val issueTimer = UInt(AnsIssueTimer.width.W)
   val deqPortIdx = UInt(log2Ceil(2).W)
 
   def srcReady: Bool = VecInit(srcStatus.map { src =>
@@ -71,6 +84,19 @@ class AnsEntryBundle(
   val status  = new AnsEntryStatus(params, iq)
   val imm     = UInt(ImmPacking.width.W)
   val payload = new DynInst(params)
+}
+
+/** 一次发射选择的完整结果；条目与操作数元数据必须经过同一个选择器。
+  *
+  * 操作数元数据保持选择当拍的寄存值；entry 中的依赖还包含用于条目转移的下一状态。
+  */
+class AnsSelectedEntry(val params: BundleParams, val iq: AnsIssueQueueParams) extends Bundle {
+  val entry          = new AnsEntryBundle(params, iq)
+  val dataSources    = Vec(params.numSrc, DataSource())
+  val exuSources     = Vec(params.numSrc, UInt(log2Ceil(params.maxExuCount + 1).W))
+  val loadDependency = Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W))
+  val isFirstIssue   = Bool()
+  val cancel         = Bool()
 }
 
 object AnsRespType {
@@ -128,17 +154,11 @@ class AnsEntriesIO(
 
   val enqEntryEnqReady = Vec(iq.numEnq, Output(Bool()))
 
-  val valid          = Output(UInt(iq.numEntries.W))
-  val issued         = Output(UInt(iq.numEntries.W))
-  val canIssue       = Output(UInt(iq.numEntries.W))
-  val fuType         = Vec(iq.numEntries, Output(FuType()))
-  val dataSources    = Vec(iq.numEntries, Vec(params.numSrc, Output(DataSource())))
-  val exuSources     = Vec(iq.numEntries, Vec(params.numSrc, Output(UInt(log2Ceil(params.maxExuCount + 1).W))))
-  val loadDependency = Vec(iq.numEntries, Vec(params.loadPipelineWidth, Output(UInt(params.loadDependencyWidth.W))))
-
-  val isFirstIssue         = Vec(iq.numDeq, Output(Bool()))
-  val deqEntry             = Vec(iq.numDeq, Valid(new AnsEntryBundle(params, iq)))
-  val cancelDeqVec         = Vec(iq.numDeq, Output(Bool()))
+  val valid                = Output(UInt(iq.numEntries.W))
+  val issued               = Output(UInt(iq.numEntries.W))
+  val canIssue             = Output(UInt(iq.numEntries.W))
+  val fuType               = Vec(iq.numEntries, Output(FuType()))
+  val deqEntry             = Vec(iq.numDeq, Valid(new AnsSelectedEntry(params, iq)))
   val othersEntryEnqSelVec = Vec(iq.numEnq, Output(UInt(iq.numOthers.W)))
 }
 
@@ -165,7 +185,9 @@ class AnsIssueQueueIO(
   val validCntDeqVec = Output(Vec(iq.numDeq, UInt(AnsIssueParams.iqValidNumWidth.W)))
 
   val wakeupToIQ = Vec(iq.numDeq, Output(Valid(new AnsIqWakeUp(params))))
-  val deq        = Vec(iq.numDeq, Decoupled(new IssueQueueIssueBundle(iq.issueBundleParams, ExecutionUnitParams(), params)))
+
+  /** DataPath 必须逐拍接收；读口冲突/EXU 拒绝通过 data0/data1Resp 通知 IQ 重试，不在此停顿保持。 */
+  val deq = Vec(iq.numDeq, Decoupled(new IssueQueueIssueBundle(iq.issueBundleParams, ExecutionUnitParams(), params)))
 }
 
 /** 数据通路回送：按 exuIdx 展平。 */
@@ -174,9 +196,11 @@ class AnsDataPathToIqIO(val params: BundleParams = BundleParams()) extends Bundl
   val data1Resp   = Vec(AnsIssueParams.nExu, Valid(new IssueEntryResponse(params)))
   val data0Cancel = Vec(AnsIssueParams.nExu, Bool())
   val data1Cancel = Vec(AnsIssueParams.nExu, Bool())
-  val s0Cancel    = Vec(AnsIssueParams.nExu, new CancelSignal(params))
-  val wbConflict  = Vec(AnsIssueParams.nExu, new WbConflictBundle(ExecutionUnitParams(), params))
-  val rcDest      = Vec(AnsIssueParams.nExu, UInt(params.regCacheIndexWidth.W))
+
+  /** 携带目的寄存器信息，送至 Dispatch 撤回 BusyTable / RegCacheTag 的就绪状态。 */
+  val data0CancelToDispatch = Vec(AnsIssueParams.nExu, new CancelSignal(params))
+  val wbConflict            = Vec(AnsIssueParams.nExu, new WbConflictBundle(ExecutionUnitParams(), params))
+  val rcDest                = Vec(AnsIssueParams.nExu, UInt(params.regCacheIndexWidth.W))
 }
 
 /** Scheduler 对外接口。所有 exu 维度都按全局 exuIdx 展平。 */

@@ -37,13 +37,13 @@ class AnsDispatchIO(val params: BundleParams = BundleParams()) extends Bundle {
   val enqRob = Flipped(new AnsRobEnqIO(params))
   val lsqEnq = Flipped(new AnsLsqEnqIO(params))
 
-  val wbPregsInt = Input(Vec(AnsDispatchParams.nIntWb, Valid(UInt(phyWidth.W))))
-  val wbPregsFp  = Input(Vec(AnsDispatchParams.nFpWb, Valid(UInt(phyWidth.W))))
-  val wakeUpAll  = Input(new AnsIQWakeUpVec(params))
-  val s0Cancel   = Input(Vec(AnsDispatchParams.nExu, new CancelSignal(params)))
-  val ldCancel   = Input(Vec(params.loadPipelineWidth, new LoadCancel))
-  val fromMem    = Input(new AnsMemToDispatchBundle(params))
-  val singleStep = Input(Bool())
+  val wbPregsInt            = Input(Vec(AnsDispatchParams.nIntWb, Valid(UInt(phyWidth.W))))
+  val wbPregsFp             = Input(Vec(AnsDispatchParams.nFpWb, Valid(UInt(phyWidth.W))))
+  val wakeUpAll             = Input(new AnsIQWakeUpVec(params))
+  val data0CancelToDispatch = Input(Vec(AnsDispatchParams.nExu, new CancelSignal(params)))
+  val ldCancel              = Input(Vec(params.loadPipelineWidth, new LoadCancel))
+  val fromMem               = Input(new AnsMemToDispatchBundle(params))
+  val singleStep            = Input(Bool())
 
   val debug = Output(new AnsDispatchDebugIO(params))
 }
@@ -101,12 +101,12 @@ class AnsDispatch(val params: BundleParams = BundleParams()) extends Module {
 
   intBusyTable.io.wbPregs    := io.wbPregsInt
   intBusyTable.io.allocPregs := allocInt
-  intBusyTable.io.cancel     := io.s0Cancel
+  intBusyTable.io.cancel     := io.data0CancelToDispatch
   intBusyTable.io.wakeUp     := VecInit(io.wakeUpAll.wakeUpInt ++ io.wakeUpAll.wakeUpMem)
 
   fpBusyTable.io.wbPregs    := io.wbPregsFp
   fpBusyTable.io.allocPregs := allocFp
-  fpBusyTable.io.cancel     := io.s0Cancel
+  fpBusyTable.io.cancel     := io.data0CancelToDispatch
   fpBusyTable.io.wakeUp     := VecInit(io.wakeUpAll.wakeUpFp ++ io.wakeUpAll.wakeUpMem)
 
   // ---- RegCacheTagTable ----
@@ -120,7 +120,7 @@ class AnsDispatch(val params: BundleParams = BundleParams()) extends Module {
     )
   )
   rcTagTable.io.allocPregs := allocInt
-  rcTagTable.io.cancel := io.s0Cancel
+  rcTagTable.io.cancel := io.data0CancelToDispatch
   for ((port, k) <- rcTagTable.io.write.zipWithIndex) {
     val wake = (io.wakeUpAll.wakeUpInt ++ io.wakeUpAll.wakeUpMem)(k)
     port.wen  := wake.valid && wake.bits.rfWen
@@ -231,6 +231,8 @@ class AnsDispatch(val params: BundleParams = BundleParams()) extends Module {
 
   val iqSort: Seq[Seq[Seq[Bool]]] = groups.indices.map { g =>
     val n = groups(g).exuIdx.size
+    // 这里 rank 是同group的第几名，m 是 iqIdx, compareMatrix(g)(m) 是指 [true,  false, true ]
+    // PopCount 是指赢了几个对手, rank1 的一定是赢了 n-1 对手, rank2 的一定是赢了 n-2 对手.
     Seq.tabulate(n, n)((rank, m) => PopCount(compareMatrix(g)(m)) === (n - 1 - rank).U)
   }
 

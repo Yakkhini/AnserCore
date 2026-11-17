@@ -2,6 +2,7 @@ package ansercore.backend.issue
 
 import chisel3._
 import chiseltest._
+import chiseltest.simulator.VerilatorBackendAnnotation
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -101,7 +102,7 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
     dut.io.enq(0).valid.poke(false.B)
   }
 
-  /** 用同一个 robIdx/端口把 S0/S1 响应依次送给对应条目。 */
+  /** 用同一个 robIdx/端口把 data0/data1 响应依次送给对应条目。 */
   private def respond(dut: AnsIssueQueue, robIdx: Int): Unit = {
     val aluPort = 0
     for (stage <- 0 until 2) {
@@ -117,8 +118,69 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
 
   behavior of "AnsIssueQueue"
 
-  it should "enqueue an ALU uop, issue it and clear after S1 success" in {
-    test(new AnsIssueQueue(params, iq)) { dut =>
+  it should "select operand metadata from enqueue entry 1 when entry 0 is waiting" in {
+    test(new AnsIssueQueue(params, iq)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      reset(dut)
+      for (port <- 0 until 2) {
+        val uop = dut.io.enq(port).bits
+        clearDynInst(uop)
+        uop.fuType.poke(FuType.alu.U)
+        uop.robIdx.poke((port + 1).U)
+        uop.psrc(0).poke((port + 5).U)
+        uop.srcType(0).poke((if (port == 0) SrcType.integer else SrcType.immediate).U)
+        uop.srcState(0).poke((if (port == 0) SourceState.waiting else SourceState.ready).U)
+        dut.io.enq(port).valid.poke(true.B)
+        dut.io.enq(port).ready.expect(true.B)
+      }
+      dut.clock.step()
+      dut.io.enq.foreach(_.valid.poke(false.B))
+      dut.clock.step()
+      dut.io.deq(0).valid.expect(true.B)
+      dut.io.deq(0).bits.common.robIdx.expect(2.U)
+      dut.io.deq(0).bits.addrOH.expect(2.U)
+      dut.io.deq(0).bits.common.dataSources(0).expect(DataSource.immediate.U)
+    }
+  }
+
+  it should "keep a migrated entry's bypass producer and dependency with its payload" in {
+    test(new AnsIssueQueue(params, iq)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      reset(dut)
+      for (port <- 0 until 2) {
+        val uop = dut.io.enq(port).bits
+        clearDynInst(uop)
+        uop.fuType.poke(FuType.alu.U)
+        uop.robIdx.poke((port + 1).U)
+        uop.psrc(0).poke((port + 5).U)
+        uop.srcType(0).poke(SrcType.integer.U)
+        uop.srcState(0).poke(SourceState.waiting.U)
+        dut.io.enq(port).valid.poke(true.B)
+      }
+      dut.clock.step()
+      dut.io.enq.foreach(_.valid.poke(false.B))
+      dut.clock.step(2)
+      dut.io.deq(0).valid.expect(false.B)
+
+      val wakeup = dut.io.wakeUpFromIQ(1)
+      wakeup.valid.poke(true.B)
+      wakeup.bits.pdest.poke(6.U)
+      wakeup.bits.intWen.poke(true.B)
+      wakeup.bits.loadDependency(0).poke(1.U)
+      dut.clock.step()
+      wakeup.valid.poke(false.B)
+      dut.clock.step()
+      dut.io.deq(0).valid.expect(true.B)
+      dut.io.deq(0).bits.addrOH.expect((1 << (iq.numEnq + 1)).U)
+      dut.io.deq(0).bits.common.robIdx.expect(2.U)
+      dut.io.deq(0).bits.psrc(0).expect(6.U)
+      dut.io.deq(0).bits.common.dataSources(0).expect(DataSource.bypass2.U)
+      dut.io.deq(0).bits.common.exuSources(0).expect((iq.wakeupSourceExuIdx(1) + 1).U)
+      dut.io.deq(0).bits.common.loadDependency(0).expect(1.U)
+      dut.io.deq(0).bits.common.isFirstIssue.expect(true.B)
+    }
+  }
+
+  it should "enqueue an ALU uop, issue it and clear after data1 success" in {
+    test(new AnsIssueQueue(params, iq)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       reset(dut)
       pushAlu(dut, pdest = 3, robIdx = 1)
       dut.io.status.validCnt.expect(1.U)
@@ -144,7 +206,7 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
   }
 
   it should "enqueue two ALU uops in the same cycle and issue the older one first" in {
-    test(new AnsIssueQueue(params, iq)) { dut =>
+    test(new AnsIssueQueue(params, iq)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       reset(dut)
 
       for ((port, pdest, robIdx) <- Seq((0, 3, 1), (1, 4, 2))) {
@@ -187,7 +249,7 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
   }
 
   it should "wake a source by IQ wakeup before issuing" in {
-    test(new AnsIssueQueue(params, iq)) { dut =>
+    test(new AnsIssueQueue(params, iq)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       reset(dut)
 
       val uop = dut.io.enq(0).bits

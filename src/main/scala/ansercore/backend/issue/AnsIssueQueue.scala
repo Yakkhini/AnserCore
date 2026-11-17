@@ -10,7 +10,7 @@
  * 简化：
  *   - 不区分 SimpleEntry；
  *   - 非确定延迟 FU（div/csr/fence/fdiv/ldu/stu/mou）不产生推测唤醒，只由 WB 唤醒；
- *   - IQ 唤醒广播前在 Scheduler 统一打一拍，避免 IQ 内部组合环。
+ *   - IQ 唤醒广播前在 Backend 统一打一拍，避免 IQ 内部组合环。
  */
 package ansercore.backend.issue
 
@@ -24,6 +24,7 @@ class AnsIssueQueue(
   val params: BundleParams = BundleParams(),
   val iq:     AnsIssueQueueParams,
 ) extends Module {
+  iq.validate(params)
   val io = IO(new AnsIssueQueueIO(params, iq))
 
   val numEnq     = iq.numEnq
@@ -46,8 +47,8 @@ class AnsIssueQueue(
     entry.status.fuType     := uop.fuType
     entry.status.blocked    := false.B
     entry.status.issued     := false.B
-    entry.status.firstIssue := false.B
-    entry.status.issueTimer := 3.U
+    entry.status.hasIssued  := false.B
+    entry.status.issueTimer := AnsIssueTimer.saturated.U(AnsIssueTimer.width.W)
     entry.status.deqPortIdx := 0.U
     for (j <- 0 until params.numSrc) {
       val srcType = uop.srcType(j)
@@ -72,11 +73,11 @@ class AnsIssueQueue(
     entry
   }
 
-  val s0EnqNotFlush   = !io.flush.valid
+  val enqNotFlush     = !io.flush.valid
   val enqEntryBundles = Wire(Vec(numEnq, new AnsEntryBundle(params, iq)))
   for (i <- 0 until numEnq) {
     enqEntryBundles(i) := makeEntryBundle(io.enq(i).bits)
-    io.enq(i).ready    := entries.io.enqEntryEnqReady(i) && s0EnqNotFlush
+    io.enq(i).ready    := entries.io.enqEntryEnqReady(i) && enqNotFlush
   }
 
   // ------------------------------------------------------------------
@@ -103,18 +104,18 @@ class AnsIssueQueue(
   entries.io.data0Resp       := io.data0Resp
   entries.io.data1Resp       := io.data1Resp
   for (i <- 0 until numEnq) {
-    entries.io.enq(i).valid := io.enq(i).valid && io.enq(i).ready
+    entries.io.enq(i).valid := io.enq(i).fire
     entries.io.enq(i).bits  := enqEntryBundles(i)
   }
 
   // ------------------------------------------------------------------
   // 发射选择
   // ------------------------------------------------------------------
-  val validVec           = VecInit(entries.io.valid.asBools)
-  val issuedVec          = VecInit(entries.io.issued.asBools)
-  val canIssueVec        = VecInit(entries.io.canIssue.asBools)
-  val fuTypeVec          = entries.io.fuType
-  val s0DoEnqSelValidVec = VecInit((0 until numEnq).map(i => io.enq(i).valid && io.enq(i).ready))
+  val validVec    = VecInit(entries.io.valid.asBools)
+  val issuedVec   = VecInit(entries.io.issued.asBools)
+  val canIssueVec = VecInit(entries.io.canIssue.asBools)
+  val fuTypeVec   = entries.io.fuType
+  val enqFireVec  = VecInit((0 until numEnq).map(i => io.enq(i).fire))
 
   val fuBusyMaskVec  = Wire(Vec(numDeq, UInt(numEntries.W)))
   val intWbMaskVec   = Wire(Vec(numDeq, UInt(numEntries.W)))
@@ -134,22 +135,32 @@ class AnsIssueQueue(
     )
   )
 
+  /** 每次调用创建独立写侧；预约有效条件由 FU / WB 调用方给出。 */
+  private def makeBusyTableWrite(latencies: Map[Int, Int], deqPort: Int, deqValid: Bool): AnsFuBusyTableWrite = {
+    val write = Module(new AnsFuBusyTableWrite(latencies, latWidth))
+    write.io.deqValid  := deqValid
+    write.io.deqFuType := deqBeforeDly(deqPort).bits.common.fuType
+    write.io.data0Resp := io.data0Resp(deqPort)
+    write.io.data1Resp := io.data1Resp(deqPort)
+    write
+  }
+
+  /** 每次调用创建独立读侧；FU 使用本地忙表，WB 使用中央汇总后的忙表。 */
+  private def makeBusyMask(latencies: Map[Int, Int], busyTable: UInt): UInt = {
+    val read = Module(new AnsFuBusyTableRead(latencies, numEntries, latWidth))
+    read.io.fuBusyTable := busyTable
+    read.io.fuTypeVec   := fuTypeVec
+    read.io.mask
+  }
+
   for (d <- 0 until numDeq) {
     val exu = iq.exus(d)
 
     // ---- FuBusyTable ----
     val needFuBusy = exu.fuLatencyMap.values.toSet.size > 1
     if (needFuBusy) {
-      val write = Module(new AnsFuBusyTableWrite(exu.fuLatencyMap, latWidth))
-      write.io.deqValid  := deqBeforeDly(d).valid
-      write.io.deqFuType := deqBeforeDly(d).bits.common.fuType
-      write.io.og0Resp   := io.data0Resp(d)
-      write.io.og1Resp   := io.data1Resp(d)
-
-      val read = Module(new AnsFuBusyTableRead(exu.fuLatencyMap, numEntries, latWidth))
-      read.io.fuBusyTable := write.io.busyTable
-      read.io.fuTypeVec   := fuTypeVec
-      fuBusyMaskVec(d)    := read.io.mask
+      val write = makeBusyTableWrite(exu.fuLatencyMap, d, deqBeforeDly(d).valid)
+      fuBusyMaskVec(d) := makeBusyMask(exu.fuLatencyMap, write.io.busyTable)
     } else {
       fuBusyMaskVec(d) := 0.U
     }
@@ -161,18 +172,14 @@ class AnsIssueQueue(
     val intTable     = Wire(UInt(latWidth.W))
     val intSet       = Wire(UInt(latWidth.W))
     if (intWbTableEn) {
-      val write = Module(new AnsFuBusyTableWrite(exu.intWbLatencyMap, latWidth))
-      write.io.deqValid  := deqBeforeDly(d).valid && deqBeforeDly(d).bits.common.intWen
-      write.io.deqFuType := deqBeforeDly(d).bits.common.fuType
-      write.io.og0Resp   := io.data0Resp(d)
-      write.io.og1Resp   := io.data1Resp(d)
-      intTable           := write.io.busyTable
-      intSet             := write.io.deqSet
-
-      val read = Module(new AnsFuBusyTableRead(exu.intWbLatencyMap, numEntries, latWidth))
-      read.io.fuBusyTable := io.wbBusyTableRead(d).intWbBusyTable
-      read.io.fuTypeVec   := fuTypeVec
-      intWbMaskVec(d)     := read.io.mask
+      val write = makeBusyTableWrite(
+        exu.intWbLatencyMap,
+        d,
+        deqBeforeDly(d).valid && deqBeforeDly(d).bits.common.intWen,
+      )
+      intTable        := write.io.busyTable
+      intSet          := write.io.deqSet
+      intWbMaskVec(d) := makeBusyMask(exu.intWbLatencyMap, io.wbBusyTableRead(d).intWbBusyTable)
     } else {
       intTable        := 0.U
       intSet          := 0.U
@@ -184,18 +191,14 @@ class AnsIssueQueue(
     val fpTable     = Wire(UInt(latWidth.W))
     val fpSet       = Wire(UInt(latWidth.W))
     if (fpWbTableEn) {
-      val write = Module(new AnsFuBusyTableWrite(exu.fpWbLatencyMap, latWidth))
-      write.io.deqValid  := deqBeforeDly(d).valid && deqBeforeDly(d).bits.common.fpWen
-      write.io.deqFuType := deqBeforeDly(d).bits.common.fuType
-      write.io.og0Resp   := io.data0Resp(d)
-      write.io.og1Resp   := io.data1Resp(d)
-      fpTable            := write.io.busyTable
-      fpSet              := write.io.deqSet
-
-      val read = Module(new AnsFuBusyTableRead(exu.fpWbLatencyMap, numEntries, latWidth))
-      read.io.fuBusyTable := io.wbBusyTableRead(d).fpWbBusyTable
-      read.io.fuTypeVec   := fuTypeVec
-      fpWbMaskVec(d)      := read.io.mask
+      val write = makeBusyTableWrite(
+        exu.fpWbLatencyMap,
+        d,
+        deqBeforeDly(d).valid && deqBeforeDly(d).bits.common.fpWen,
+      )
+      fpTable        := write.io.busyTable
+      fpSet          := write.io.deqSet
+      fpWbMaskVec(d) := makeBusyMask(exu.fpWbLatencyMap, io.wbBusyTableRead(d).fpWbBusyTable)
     } else {
       fpTable        := 0.U
       fpSet          := 0.U
@@ -216,7 +219,7 @@ class AnsIssueQueue(
   // ---- 年龄选择 ----
   // 入队口 i 固定写 EnqEntry i；年龄矩阵需要的是"哪个 entry 入队"的 one-hot。
   val enqAgeEnq = VecInit((0 until numEnq).map { i =>
-    Mux(s0DoEnqSelValidVec(i), UIntToOH(i.U, numEnq), 0.U(numEnq.W))
+    Mux(enqFireVec(i), UIntToOH(i.U, numEnq), 0.U(numEnq.W))
   })
   for (d <- 0 until numDeq) {
     val enqCanIssue    = deqCanIssueVec(d)(numEnq - 1, 0)
@@ -252,13 +255,13 @@ class AnsIssueQueue(
   for (d <- 0 until numDeq) {
     val entry     = entries.io.deqEntry(d)
     val selected  = entry.valid
-    val cancelled = entries.io.cancelDeqVec(d)
+    val cancelled = entry.bits.cancel
 
     deqBeforeDly(d).valid := selected && !cancelled
     deqBeforeDly(d).bits  := 0.U.asTypeOf(deqBeforeDly(d).bits)
 
-    val payload = entry.bits.payload
-    val status  = entry.bits.status
+    val payload = entry.bits.entry.payload
+    val status  = entry.bits.entry.status
 
     deqBeforeDly(d).bits.srcType     := payload.srcType
     deqBeforeDly(d).bits.psrc        := VecInit(status.srcStatus.map(_.psrc))
@@ -273,11 +276,11 @@ class AnsIssueQueue(
     common.immType           := payload.immType
     common.srcType           := payload.srcType
     common.src               := 0.U.asTypeOf(common.src)
-    common.imm               := entry.bits.imm
+    common.imm               := entry.bits.entry.imm
     common.nextPcOffset      := 4.U
     common.robIdx            := status.robIdx
     common.iqIdx             := OHToUInt(entries.io.deqSelOH(d).bits)
-    common.isFirstIssue      := entries.io.isFirstIssue(d)
+    common.isFirstIssue      := entry.bits.isFirstIssue
     common.pdest             := payload.pdest
     common.intWen            := payload.intWen
     common.fpWen             := payload.fpWen
@@ -291,10 +294,10 @@ class AnsIssueQueue(
     common.predictValid      := false.B
     common.lqIdx             := payload.lqIdx
     common.sqIdx             := payload.sqIdx
-    common.dataSources       := entries.io.dataSources(d)
-    common.exuSources        := entries.io.exuSources(d)
+    common.dataSources       := entry.bits.dataSources
+    common.exuSources        := entry.bits.exuSources
     common.srcTimer          := 0.U.asTypeOf(common.srcTimer)
-    common.loadDependency    := entries.io.loadDependency(d)
+    common.loadDependency    := entry.bits.loadDependency
     common.copyValid         := false.B
     common.copyDest          := 0.U.asTypeOf(common.copyDest)
     common.copyIntWen        := 0.U.asTypeOf(common.copyIntWen)
@@ -327,8 +330,8 @@ class AnsIssueQueue(
       val flush = Wire(new AnsWakeupFlush(params))
       flush.redirect                    := io.flush
       flush.ldCancel                    := io.ldCancel
-      flush.og0Fail                     := io.data0Resp(d).valid && !io.data0Resp(d).bits.ready
-      flush.og1Fail                     := io.data1Resp(d).valid && !io.data1Resp(d).bits.ready
+      flush.data0Fail                   := io.data0Resp(d).valid && !io.data0Resp(d).bits.ready
+      flush.data1Fail                   := io.data1Resp(d).valid && !io.data1Resp(d).bits.ready
       wq.io.flush                       := flush
       wq.io.enq.valid                   := deqBeforeDly(d).valid && hasLat
       wq.io.enq.bits.lat                := lat

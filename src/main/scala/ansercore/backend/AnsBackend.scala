@@ -78,9 +78,9 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
   ctrlBlock.io.enqRob.resp                 := rob.io.enq.resp
 
   // ---- Issue / DataPath ----
-  val intSchd  = Module(new AnsScheduler(params, AnsIssueParams.intScheduler))
-  val fpSchd   = Module(new AnsScheduler(params, AnsIssueParams.fpScheduler))
-  val memSchd  = Module(new AnsScheduler(params, AnsIssueParams.memScheduler))
+  val intSchd  = Module(AnsScheduler(params, AnsIssueParams.intScheduler))
+  val fpSchd   = Module(AnsScheduler(params, AnsIssueParams.fpScheduler))
+  val memSchd  = Module(AnsScheduler(params, AnsIssueParams.memScheduler))
   val dataPath = Module(new AnsDataPath(params))
   val exuBlock = Module(new AnsExuBlockStub(params))
   val wbDp     = Module(new AnsWbDataPathStub(params))
@@ -178,8 +178,8 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
     ctrlBlock.io.wbPregsFp(k).bits  := wbDp.io.fpWriteBack(k).addr
   }
 
-  ctrlBlock.io.s0Cancel := dataPath.io.toIq.s0Cancel
-  ctrlBlock.io.ldCancel := 0.U.asTypeOf(ctrlBlock.io.ldCancel)
+  ctrlBlock.io.data0CancelToDispatch := dataPath.io.toIq.data0CancelToDispatch
+  ctrlBlock.io.ldCancel              := 0.U.asTypeOf(ctrlBlock.io.ldCancel)
 
   // ---- Scheduler <-> DataPath ----
   for ((schd, sp) <- schedulers) {

@@ -27,14 +27,25 @@ class AnsWbFuBusyTable(val params: BundleParams = BundleParams()) extends Module
     io.conflict(e).fpConflict  := false.B
   }
 
-  // int domain
+  /** 输入同一物理写口的各 EXU 预约，返回合并忙表与本拍新增预约冲突。 */
+  def mergeReservations(tables: Seq[UInt], reservations: Seq[UInt]): (UInt, Bool) = {
+    require(tables.nonEmpty && tables.size == reservations.size)
+    val merged   = tables.reduce(_ | _)
+    val conflict = (0 until tableSize)
+      .map { bit =>
+        PopCount(VecInit(reservations.map(_(bit)))) > 1.U
+      }
+      .reduce(_ || _)
+    (merged, conflict)
+  }
+
   for (p <- 0 until AnsIssueParams.nIntWb) {
     val members = AnsIssueParams.allExus.filter(_.intWbPort == p)
     if (members.nonEmpty) {
-      val merged   = members.map(e => io.write(e.exuIdx).intWbBusyTable).reduce(_ | _)
-      val conflict = VecInit((0 until tableSize).map { bit =>
-        PopCount(VecInit(members.map(e => io.write(e.exuIdx).intDeqRespSet(bit)))) > 1.U
-      }).asUInt.orR
+      val (merged, conflict) = mergeReservations(
+        members.map(e => io.write(e.exuIdx).intWbBusyTable),
+        members.map(e => io.write(e.exuIdx).intDeqRespSet),
+      )
       members.foreach { e =>
         io.read(e.exuIdx).intWbBusyTable  := merged
         io.conflict(e.exuIdx).intConflict := conflict
@@ -42,14 +53,13 @@ class AnsWbFuBusyTable(val params: BundleParams = BundleParams()) extends Module
     }
   }
 
-  // fp domain
   for (p <- 0 until AnsIssueParams.nFpWb) {
     val members = AnsIssueParams.allExus.filter(_.fpWbPort == p)
     if (members.nonEmpty) {
-      val merged   = members.map(e => io.write(e.exuIdx).fpWbBusyTable).reduce(_ | _)
-      val conflict = VecInit((0 until tableSize).map { bit =>
-        PopCount(VecInit(members.map(e => io.write(e.exuIdx).fpDeqRespSet(bit)))) > 1.U
-      }).asUInt.orR
+      val (merged, conflict) = mergeReservations(
+        members.map(e => io.write(e.exuIdx).fpWbBusyTable),
+        members.map(e => io.write(e.exuIdx).fpDeqRespSet),
+      )
       members.foreach { e =>
         io.read(e.exuIdx).fpWbBusyTable  := merged
         io.conflict(e.exuIdx).fpConflict := conflict

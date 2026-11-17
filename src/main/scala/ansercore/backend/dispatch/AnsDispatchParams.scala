@@ -43,21 +43,18 @@ object AnsDispatchParams {
   val ldu1   = 6
   val sta0   = 7
 
-  val iqList: Seq[AnsIQParams] = Seq(
-    AnsIQParams("Int-IQ0", Seq(FuType.alu, FuType.mul, FuType.bku, FuType.brh, FuType.jmp), 24, numDeq = 2),
-    AnsIQParams("Int-IQ1", Seq(FuType.alu, FuType.mul, FuType.bku, FuType.brh, FuType.jmp), 24, numDeq = 2),
+  // IQ 拓扑、容量和端口数以 Issue 参数为唯一来源，避免两份配置漂移。
+  val iqList: Seq[AnsIQParams] = AnsIssueParams.dispatchIQs.map { iq =>
     AnsIQParams(
-      "Int-IQ2",
-      Seq(FuType.alu, FuType.brh, FuType.jmp, FuType.csr, FuType.fence, FuType.div),
-      24,
-      numDeq                                                                                           = 2,
-    ),
-    AnsIQParams("FP-IQ0", Seq(FuType.falu, FuType.fmac, FuType.fcvt, FuType.fdiv), 18, numDeq          = 2, isFp = true),
-    AnsIQParams("FP-IQ1", Seq(FuType.falu, FuType.fmac), 18, numDeq                                    = 1, isFp = true),
-    AnsIQParams("LDU0", Seq(FuType.ldu), 16, isMem                                                     = true),
-    AnsIQParams("LDU1", Seq(FuType.ldu), 16, isMem                                                     = true),
-    AnsIQParams("STA0", Seq(FuType.stu, FuType.mou), 16, isMem                                         = true),
-  )
+      name       = iq.name,
+      fuTypes    = iq.fuTypes,
+      numEntries = iq.numEntries,
+      numEnq     = iq.numEnq,
+      numDeq     = iq.numDeq,
+      isFp       = iq.isFp,
+      isMem      = iq.isMem,
+    )
+  }
 
   // 全局 EXU 编号；以 AnsIssueParams 为唯一来源。
   val exuALU0: Int = AnsIssueParams.exuIdxOf("ALU0")
@@ -88,6 +85,10 @@ object AnsDispatchParams {
   require(
     iqList.map(_.name) == AnsIssueParams.dispatchIQs.map(_.name),
     "AnsDispatchParams.iqList must match AnsIssueParams.dispatchIQs",
+  )
+  require(
+    iqList.map(_.numEnq) == AnsIssueParams.dispatchIQs.map(_.numEnq),
+    "AnsDispatchParams.iqList enq widths must match AnsIssueParams.dispatchIQs",
   )
 
   val iqValidNumWidth: Int = log2Up(iqList.map(_.numEntries).max + 1)

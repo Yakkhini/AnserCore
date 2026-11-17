@@ -128,9 +128,9 @@ class CtrlBlockSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers
       clearWakeUp(dut.io.wakeUpAll.wakeUpMem(port).bits)
     }
     for (port <- 0 until AnsDispatchParams.nExu) {
-      dut.io.s0Cancel(port).intWen.poke(false.B)
-      dut.io.s0Cancel(port).fpWen.poke(false.B)
-      dut.io.s0Cancel(port).pdest.poke(0.U)
+      dut.io.data0CancelToDispatch(port).intWen.poke(false.B)
+      dut.io.data0CancelToDispatch(port).fpWen.poke(false.B)
+      dut.io.data0CancelToDispatch(port).pdest.poke(0.U)
     }
     for (port <- 0 until params.loadPipelineWidth) {
       dut.io.ldCancel(port).first.poke(false.B)

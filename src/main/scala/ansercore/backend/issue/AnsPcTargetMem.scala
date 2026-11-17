@@ -1,6 +1,6 @@
 /* 后端 PC / target 本地镜像。
  *
- * 由前端 FTQ 的写请求复制更新，DataPath 在 S0 发出查询、S1 使用结果。
+ * 由前端 FTQ 的写请求复制更新，DataPath 在 data0 发出查询、data1 使用结果。
  * 读 PC 用 ftqPtr + ftqOffset；读预测目标用 ftqPtr+1 的 startAddr。
  */
 package ansercore.backend.issue

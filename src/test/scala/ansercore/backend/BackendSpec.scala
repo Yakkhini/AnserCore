@@ -2,6 +2,7 @@ package ansercore.backend
 
 import chisel3._
 import chiseltest._
+import chiseltest.simulator.VerilatorBackendAnnotation
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -11,7 +12,8 @@ import ansercore.backend.dispatch.AnsDispatchParams
 
 /** Backend 对外接口测试。
   *
-  * Backend 只暴露前端输入、stall 和 debug 镜像；ROB/CSR/LSQ/IQ 的连接都在 Backend 内部。 需要驱动这些内部总线的用例放在 CtrlBlockSpec。
+  * Backend 只暴露前端输入、stall 和 debug 镜像；ROB/CSR/LSQ/IQ 的连接都在 Backend 内部。 需要驱动这些内部总线的用例放在 CtrlBlockSpec。 完整后端包含全部 IQ，使用
+  * Verilator 避免 Treadle 的逐拍解释开销。
   */
 class BackendSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   private val params = BundleParams(renameWidth = 4)
@@ -67,7 +69,7 @@ class BackendSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   behavior of "AnsBackend"
 
   it should "accept a group at T0 and expose the T1 result at T1" in {
-    test(new AnsBackend(params)) { dut =>
+    test(new AnsBackend(params)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       resetBackend(dut)
       val addi = iType(11, 0, 0, 1, 0x13)
       drive(dut, 0, addi, pc = 0x2000)
@@ -86,7 +88,7 @@ class BackendSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   }
 
   it should "drive both RAT banks and the FMA third source from the decoded group" in {
-    test(new AnsBackend(params)) { dut =>
+    test(new AnsBackend(params)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       resetBackend(dut)
       drive(dut, 0, fma(13, 0, 12, 11, 0, 10, 0x43))
       dut.io.debug.intRat(0)(0).addr.expect(11.U)
@@ -103,7 +105,7 @@ class BackendSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   }
 
   it should "fuse a safe same-block pair and expose fusion metadata" in {
-    test(new AnsBackend(params)) { dut =>
+    test(new AnsBackend(params)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       resetBackend(dut)
       drive(dut, 0, iType(1, 6, 1, 5, 0x13))    // slli x5, x6, 1
       drive(dut, 1, rType(0, 7, 5, 0, 5, 0x33)) // add x5, x5, x7
@@ -121,7 +123,7 @@ class BackendSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   }
 
   it should "carry a frontend exception through decode into T1" in {
-    test(new AnsBackend(params)) { dut =>
+    test(new AnsBackend(params)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       resetBackend(dut)
       drive(dut, 0, iType(1, 0, 0, 1, 0x13))
       dut.io.in(0).bits.exceptionBits.poke((BigInt(1) << FetchExceptionBits.misaligned).U)
@@ -135,7 +137,7 @@ class BackendSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   }
 
   it should "report an illegal instruction through the internal CSR trap bus" in {
-    test(new AnsBackend(params)) { dut =>
+    test(new AnsBackend(params)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       resetBackend(dut)
       drive(dut, 0, 0) // table miss -> illegal
       dut.clock.step()
@@ -150,7 +152,7 @@ class BackendSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   }
 
   it should "rename a decode group and dispatch it to the internal IQ buses" in {
-    test(new AnsBackend(params)) { dut =>
+    test(new AnsBackend(params)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       resetBackend(dut)
       drive(dut, 0, iType(1, 0, 0, 1, 0x13), pc = 0x1000) // addi x1, x0, 1
       drive(dut, 1, iType(2, 1, 0, 2, 0x13), pc = 0x1004) // addi x2, x1, 2

@@ -1,9 +1,9 @@
 /* 推测唤醒队列。
  *
  * 指令从 IQ 出队时按固定延迟进入对应深度的移位管线，延迟到达后广播给
- * 其它 IQ。遇到 redirect / load cancel / S0-S1 block 时删除对应唤醒。
+ * 其它 IQ。遇到 redirect / load cancel / data0-data1 block 时删除对应唤醒。
  *
- * 注意：Delay-0 管线是组合直通；Scheduler 在广播前统一打一拍，避免 IQ
+ * 注意：Delay-0 管线是组合直通；Backend 在广播前统一打一拍，避免 IQ
  * 内部形成组合环，同时仍比真正的 WB 唤醒早。
  */
 package ansercore.backend.issue
@@ -15,10 +15,10 @@ import ansercore.backend.Bundles._
 import ansercore.backend.rename.AnsRenameRedirect
 
 class AnsWakeupFlush(val params: BundleParams = BundleParams()) extends Bundle {
-  val redirect = Valid(new AnsRenameRedirect(params))
-  val ldCancel = Vec(params.loadPipelineWidth, new LoadCancel)
-  val og0Fail  = Bool()
-  val og1Fail  = Bool()
+  val redirect  = Valid(new AnsRenameRedirect(params))
+  val ldCancel  = Vec(params.loadPipelineWidth, new LoadCancel)
+  val data0Fail = Bool()
+  val data1Fail = Bool()
 }
 
 class AnsWakeupPipe(val depth: Int, val params: BundleParams = BundleParams()) extends Module {
@@ -34,8 +34,8 @@ class AnsWakeupPipe(val depth: Int, val params: BundleParams = BundleParams()) e
     val redirectFlush = AnsIssueUtils.needFlush(bits.robIdx, io.flush.redirect)
     val loadFlush     = LoadShouldCancel(bits.loadDependency, io.flush.ldCancel)
     val stageFlush    =
-      (if (stage == 1) io.flush.og0Fail else false.B) ||
-        (if (stage == 2) io.flush.og1Fail else false.B)
+      (if (stage == 1) io.flush.data0Fail else false.B) ||
+        (if (stage == 2) io.flush.data1Fail else false.B)
     redirectFlush || loadFlush || stageFlush
   }
 
@@ -68,6 +68,7 @@ class AnsMultiWakeupQueue(
   val params:     BundleParams = BundleParams(),
 ) extends Module {
   require(latencySet.nonEmpty && latencySet.min >= 0)
+  require(latencySet.max <= params.maxLatency, "wakeup latency exceeds the latency field capacity")
 
   val io = IO(new Bundle {
     val flush = Input(new AnsWakeupFlush(params))

@@ -33,7 +33,7 @@ final case class AnsCertainLatency(cycles: Int) extends AnsFuLatency {
   def value: Option[Int] = Some(cycles)
 }
 
-final case class AnsUncertainLatency() extends AnsFuLatency {
+case object AnsUncertainLatency extends AnsFuLatency {
   def value: Option[Int] = None
 }
 
@@ -42,7 +42,12 @@ final case class AnsFuConfig(
   fuType:     Int,
   latency:    AnsFuLatency,
   writesData: Boolean = true,
-)
+) {
+  require(
+    fuType > 0 && fuType < (1 << FuType.width) && Integer.bitCount(fuType) == 1,
+    s"$name FU type must be a supported one-hot encoding",
+  )
+}
 
 /** 一个 ExeUnit 的静态属性。
   *
@@ -64,13 +69,34 @@ final case class AnsExuParams(
   needPc:      Boolean = false,
 ) {
   require(fuConfigs.nonEmpty, s"$name must contain at least one FU")
+  require(exuIdx >= 0, s"$name EXU index must be non-negative")
+  require(numRegSrc > 0, s"$name must have at least one source slot")
+  require(fuConfigs.map(_.fuType).distinct.size == fuConfigs.size, s"$name FU types must be unique")
   require(intRdPorts.length == numRegSrc && fpRdPorts.length == numRegSrc, s"$name read-port count mismatch")
+  require((intRdPorts ++ fpRdPorts).forall(_ >= -1), s"$name read ports must be -1 or non-negative")
+  require(intWbPort >= -1 && fpWbPort >= -1, s"$name writeback ports must be -1 or non-negative")
+
+  def validate(params: BundleParams): Unit = {
+    require(exuIdx < params.maxExuCount, s"$name EXU index exceeds source encoding capacity")
+    require(numRegSrc == params.numSrc, s"$name source count differs from BundleParams")
+    require(fuLatencyMap.values.forall(_ <= params.maxLatency), s"$name latency exceeds busy-table capacity")
+    require(intWbPort < AnsIssueParams.nIntWb && fpWbPort < AnsIssueParams.nFpWb, s"$name writeback port out of range")
+    require(
+      intRdPorts.forall(_ < AnsIssueParams.nIntRd) && fpRdPorts.forall(_ < AnsIssueParams.nFpRd),
+      s"$name read port out of range",
+    )
+  }
 
   def fuTypes: Seq[Int] = fuConfigs.map(_.fuType).distinct
 
   /** 固定延迟 FUs；不确定延迟 FUs 不进推测唤醒和固定延迟忙表。 */
   def fuLatencyMap: Map[Int, Int] =
-    fuConfigs.collect { case cfg if cfg.latency.value.nonEmpty => cfg.fuType -> cfg.latency.value.get }.toMap
+    fixedLatencyMap(fuConfigs)
+
+  private def fixedLatencyMap(configs: Seq[AnsFuConfig]): Map[Int, Int] =
+    configs.flatMap(cfg => cfg.latency.value.map(cycles => cfg.fuType -> cycles)).toMap
+
+  private def wbLatencyMap: Map[Int, Int] = fixedLatencyMap(fuConfigs.filter(_.writesData))
 
   def wakeupFuLatencySet: Set[Int] = fuLatencyMap.values.toSet
 
@@ -105,20 +131,10 @@ final case class AnsExuParams(
 
   /** 该 EXU 的写回域/端口（用于 DataPath 和 WbFuBusyTable）。 */
   def intWbLatencyMap: Map[Int, Int] =
-    if (writesInt)
-      fuConfigs
-        .filter(_.writesData)
-        .collect { case c if c.latency.value.nonEmpty => c.fuType -> c.latency.value.get }
-        .toMap
-    else Map()
+    if (writesInt) wbLatencyMap else Map.empty
 
   def fpWbLatencyMap: Map[Int, Int] =
-    if (writesFp)
-      fuConfigs
-        .filter(_.writesData)
-        .collect { case c if c.latency.value.nonEmpty => c.fuType -> c.latency.value.get }
-        .toMap
-    else Map()
+    if (writesFp) wbLatencyMap else Map.empty
 
   def isIntLatencyCertain: Boolean =
     !writesInt || fuConfigs.filter(_.writesData).forall(_.latency.value.nonEmpty)
@@ -142,7 +158,18 @@ final case class AnsIssueQueueParams(
   require(exus.nonEmpty, s"$name must have at least one dequeue port")
   require(numEntries > numEnq, s"$name needs at least one OthersEntry")
   require(numEnq >= 1 && numEnq <= 2, s"$name enq width is 1 or 2")
-  require(exus.size == numEnq || exus.size <= 2, s"$name supports at most two dequeue ports")
+  require(exus.size <= 2, s"$name supports at most two dequeue ports")
+  require(iqIdx >= 0, s"$name IQ index must be non-negative")
+  require(exus.map(_.exuIdx).distinct.size == exus.size, s"$name EXU indices must be unique")
+  require(exus.forall(_.schdType == schdType), s"$name EXUs must belong to the same scheduler type")
+  require(
+    isFp == (schdType == AnsFpScheduler) && isMem == (schdType == AnsMemScheduler),
+    s"$name domain flags disagree with scheduler type",
+  )
+  require(
+    wakeupSourceExuIdx.distinct.size == wakeupSourceExuIdx.size && wakeupSourceExuIdx.forall(_ >= 0),
+    s"$name wakeup source indices must be unique and non-negative",
+  )
   // 多出口 IQ 的 FU 集合必须互斥，否则同一 entry 可能被两个出口同时选中。
   require(
     exus.combinations(2).forall { case Seq(a, b) => a.fuTypes.toSet.intersect(b.fuTypes.toSet).isEmpty },
@@ -150,6 +177,17 @@ final case class AnsIssueQueueParams(
   )
 
   def numDeq: Int = exus.size
+
+  def validate(params: BundleParams): Unit = {
+    exus.foreach(_.validate(params))
+    require(numEntries <= AnsIssueParams.maxEntries, s"$name entry count exceeds issue-bundle capacity")
+    require(
+      wakeupSourceExuIdx.forall(idx =>
+        idx < params.maxExuCount && AnsIssueParams.allExus.exists(e => e.exuIdx == idx && e.isIQWakeUpSource)
+      ),
+      s"$name references an unavailable IQ wakeup source",
+    )
+  }
 
   def fuTypes: Seq[Int] = exus.flatMap(_.fuTypes).distinct
 
@@ -182,9 +220,28 @@ final case class AnsSchedulerParams(
 ) {
   require(iqs.nonEmpty, "scheduler must contain at least one IQ")
   require(iqs.map(_.iqIdx).distinct.size == iqs.size, "IQ indices must be unique")
+  require(iqs.map(_.name).distinct.size == iqs.size, "IQ names must be unique")
+  require(iqs.forall(_.schdType == schdType), "IQ scheduler types must match their scheduler")
+  require(
+    iqs.flatMap(_.exus.map(_.exuIdx)).distinct.size == iqs.map(_.numDeq).sum,
+    "an EXU must belong to exactly one IQ within its scheduler",
+  )
 
-  /** Dispatch 可见的入队口数量；STD0 由 MemScheduler 复制，不占 Dispatch 端口。 */
-  def dispatchEnqPorts: Int = iqs.filterNot(_.name == "STD0").map(_.numEnq).sum
+  def validate(params: BundleParams): Unit = iqs.foreach(_.validate(params))
+
+  /** Dispatch 直接喂入的 IQ；STD0 由 MemScheduler 从 STA0 复制，不占 Dispatch 端口。 */
+  val dispatchIQs: Seq[AnsIssueQueueParams] = iqs.filterNot(_.name == "STD0")
+
+  /** Dispatch 可见的入队口数量；复制目的 IQ 不占端口。 */
+  def dispatchEnqPorts: Int = dispatchIQs.map(_.numEnq).sum
+
+  /** (IQ, 入队槽) 对应的 `fromDispatch` 端口号。 */
+  def dispatchPortOf(iq: String, slot: Int): Int = {
+    val pos = dispatchIQs.indexWhere(_.name == iq)
+    require(pos >= 0, s"$iq is not dispatch-fed in $schdType")
+    require(slot >= 0 && slot < dispatchIQs(pos).numEnq, s"$iq enqueue slot $slot out of range")
+    dispatchIQs.take(pos).map(_.numEnq).sum + slot
+  }
 
   def numEnqPorts: Int = iqs.map(_.numEnq).sum
 
@@ -210,7 +267,7 @@ object AnsIssueParams {
     AnsFuConfig(name, fuType, AnsCertainLatency(cycles))
 
   private def uncertain(fuType: Int, name: String): AnsFuConfig =
-    AnsFuConfig(name, fuType, AnsUncertainLatency())
+    AnsFuConfig(name, fuType, AnsUncertainLatency)
 
   private def exu(
     name:               String,
@@ -361,6 +418,8 @@ object AnsIssueParams {
   val allExus: Seq[AnsExuParams] = intExus ++ fpExus ++ memExus
 
   require(allExus.map(_.exuIdx).distinct.size == allExus.size, "ExeUnit indices must be unique")
+  require(allExus.map(_.exuIdx) == allExus.indices, "ExeUnit indices must be contiguous and in port order")
+  require(allExus.map(_.name).distinct.size == allExus.size, "ExeUnit names must be unique")
 
   def exuByIndex(idx: Int): AnsExuParams = allExus
     .find(_.exuIdx == idx)
@@ -386,41 +445,43 @@ object AnsIssueParams {
   // 访存指令的源可以是整数或浮点，必须接收两类唤醒。
   private val memWakeAll: Seq[Int] = (intWakeSrc ++ fpWakeSrc ++ memWakeSrc).distinct.sorted
 
+  // 四宽分派的容量基线：Int 3×20 + Fp 2×16 + Mem 4×16 = 156 项。
+  // numEntries 包含每个 IQ 的 2 个 EnqEntry；Dispatch 参数由此处派生。
   val intScheduler: AnsSchedulerParams = AnsSchedulerParams(
     AnsIntScheduler,
     Seq(
       AnsIssueQueueParams(
-        "Int-IQ0",
-        0,
-        AnsIntScheduler,
-        Seq(intExus(0), intExus(1)),
-        24,
-        2,
-        intWakeAll,
-        isFp  = false,
-        isMem = false,
+        name               = "Int-IQ0",
+        iqIdx              = 0,
+        schdType           = AnsIntScheduler,
+        exus               = Seq(intExus(0), intExus(1)),
+        numEntries         = 20,
+        numEnq             = 2,
+        wakeupSourceExuIdx = intWakeAll,
+        isFp               = false,
+        isMem              = false,
       ),
       AnsIssueQueueParams(
-        "Int-IQ1",
-        1,
-        AnsIntScheduler,
-        Seq(intExus(2), intExus(3)),
-        24,
-        2,
-        intWakeAll,
-        isFp  = false,
-        isMem = false,
+        name               = "Int-IQ1",
+        iqIdx              = 1,
+        schdType           = AnsIntScheduler,
+        exus               = Seq(intExus(2), intExus(3)),
+        numEntries         = 20,
+        numEnq             = 2,
+        wakeupSourceExuIdx = intWakeAll,
+        isFp               = false,
+        isMem              = false,
       ),
       AnsIssueQueueParams(
-        "Int-IQ2",
-        2,
-        AnsIntScheduler,
-        Seq(intExus(4), intExus(5)),
-        24,
-        2,
-        intWakeAll,
-        isFp  = false,
-        isMem = false,
+        name               = "Int-IQ2",
+        iqIdx              = 2,
+        schdType           = AnsIntScheduler,
+        exus               = Seq(intExus(4), intExus(5)),
+        numEntries         = 20,
+        numEnq             = 2,
+        wakeupSourceExuIdx = intWakeAll,
+        isFp               = false,
+        isMem              = false,
       ),
     ),
   )
@@ -429,28 +490,78 @@ object AnsIssueParams {
     AnsFpScheduler,
     Seq(
       AnsIssueQueueParams(
-        "FP-IQ0",
-        3,
-        AnsFpScheduler,
-        Seq(fpExus(0), fpExus(1)),
-        18,
-        2,
-        fpWakeAll,
-        isFp                                                                                  = true,
-        isMem                                                                                 = false,
+        name               = "FP-IQ0",
+        iqIdx              = 3,
+        schdType           = AnsFpScheduler,
+        exus               = Seq(fpExus(0), fpExus(1)),
+        numEntries         = 16,
+        numEnq             = 2,
+        wakeupSourceExuIdx = fpWakeAll,
+        isFp               = true,
+        isMem              = false,
       ),
-      AnsIssueQueueParams("FP-IQ1", 4, AnsFpScheduler, Seq(fpExus(2)), 18, 2, fpWakeAll, isFp = true, isMem = false),
+      AnsIssueQueueParams(
+        name               = "FP-IQ1",
+        iqIdx              = 4,
+        schdType           = AnsFpScheduler,
+        exus               = Seq(fpExus(2)),
+        numEntries         = 16,
+        numEnq             = 2,
+        wakeupSourceExuIdx = fpWakeAll,
+        isFp               = true,
+        isMem              = false,
+      ),
     ),
   )
 
   val memScheduler: AnsSchedulerParams = AnsSchedulerParams(
     AnsMemScheduler,
     Seq(
-      AnsIssueQueueParams("LDU0", 5, AnsMemScheduler, Seq(memExus(0)), 16, 2, memWakeAll, isFp = false, isMem = true),
-      AnsIssueQueueParams("LDU1", 6, AnsMemScheduler, Seq(memExus(1)), 16, 2, memWakeAll, isFp = false, isMem = true),
-      AnsIssueQueueParams("STA0", 7, AnsMemScheduler, Seq(memExus(2)), 16, 2, memWakeAll, isFp = false, isMem = true),
-      // STD0 is fed by the MemScheduler, not by Dispatch.
-      AnsIssueQueueParams("STD0", 8, AnsMemScheduler, Seq(memExus(3)), 16, 2, memWakeAll, isFp = false, isMem = true),
+      AnsIssueQueueParams(
+        name               = "LDU0",
+        iqIdx              = 5,
+        schdType           = AnsMemScheduler,
+        exus               = Seq(memExus(0)),
+        numEntries         = 16,
+        numEnq             = 2,
+        wakeupSourceExuIdx = memWakeAll,
+        isFp               = false,
+        isMem              = true,
+      ),
+      AnsIssueQueueParams(
+        name               = "LDU1",
+        iqIdx              = 6,
+        schdType           = AnsMemScheduler,
+        exus               = Seq(memExus(1)),
+        numEntries         = 16,
+        numEnq             = 2,
+        wakeupSourceExuIdx = memWakeAll,
+        isFp               = false,
+        isMem              = true,
+      ),
+      AnsIssueQueueParams(
+        name               = "STA0",
+        iqIdx              = 7,
+        schdType           = AnsMemScheduler,
+        exus               = Seq(memExus(2)),
+        numEntries         = 16,
+        numEnq             = 2,
+        wakeupSourceExuIdx = memWakeAll,
+        isFp               = false,
+        isMem              = true,
+      ),
+      // STD0 is fed by AnsSchedulerMem from STA0, not by Dispatch.
+      AnsIssueQueueParams(
+        name               = "STD0",
+        iqIdx              = 8,
+        schdType           = AnsMemScheduler,
+        exus               = Seq(memExus(3)),
+        numEntries         = 16,
+        numEnq             = 2,
+        wakeupSourceExuIdx = memWakeAll,
+        isFp               = false,
+        isMem              = true,
+      ),
     ),
   )
 
@@ -458,8 +569,12 @@ object AnsIssueParams {
 
   val allIQs: Seq[AnsIssueQueueParams] = allSchedulers.flatMap(_.iqs)
 
-  /** 由 Dispatch 直接入队的 IQ（STD0 除外），顺序即 AnsDispatchParams.iqList。 */
-  val dispatchIQs: Seq[AnsIssueQueueParams] = allIQs.filterNot(_.name == "STD0")
+  require(allIQs.map(_.iqIdx).distinct.size == allIQs.size, "global IQ indices must be unique")
+  require(allIQs.map(_.name).distinct.size == allIQs.size, "global IQ names must be unique")
+  require(allIQs.flatMap(_.exus) == allExus, "IQ topology must cover each EXU once in port order")
+
+  /** 由 Dispatch 直接入队的 IQ（复制目的 IQ 除外），顺序即 AnsDispatchParams.iqList。 */
+  val dispatchIQs: Seq[AnsIssueQueueParams] = allSchedulers.flatMap(_.dispatchIQs)
 
   require(dispatchIQs.size == 8, "Dispatch expects 8 issue queues")
   require(
@@ -471,6 +586,8 @@ object AnsIssueParams {
   val nExu: Int                 = allExus.size
   val nIntWb: Int               = 4
   val nFpWb: Int                = 4
+  val nIntRd: Int               = allExus.flatMap(_.intRdPorts).foldLeft(-1)(_ max _) + 1
+  val nFpRd: Int                = allExus.flatMap(_.fpRdPorts).foldLeft(-1)(_ max _) + 1
   val intWakeUpExuIdx: Seq[Int] = intWakeSrc
   val fpWakeUpExuIdx: Seq[Int]  = fpWakeSrc
   val memWakeUpExuIdx: Seq[Int] = memWakeSrc
@@ -485,6 +602,12 @@ object AnsIssueParams {
   // data-path exus: everyone except pure memory units (they go to MemBlock).
   val datapathExus: Seq[AnsExuParams] = allExus.filterNot(e => e.isLoad || e.isStore)
   val memExuParams: Seq[AnsExuParams] = allExus.filter(e => e.isLoad || e.isStore)
+
+  def validate(params: BundleParams): Unit = {
+    require(nExu <= params.maxExuCount, "EXU topology exceeds source encoding capacity")
+    require(loadPipelineWidth == params.loadPipelineWidth, "load dependency lanes differ from load topology")
+    allSchedulers.foreach(_.validate(params))
+  }
 
   def iqByName(name: String): AnsIssueQueueParams = allIQs
     .find(_.name == name)

@@ -64,15 +64,15 @@ class AnsCtrlBlockIO(val params: BundleParams = BundleParams()) extends Bundle {
   val lsqEnq        = Flipped(new AnsLsqEnqIO(params))
 
   // Scheduler / MemBlock 回送的状态。
-  val IQValidNumVec = Input(Vec(AnsIssueParams.nExu, UInt(AnsDispatchParams.iqValidNumWidth.W)))
-  val wbPregsInt    = Input(Vec(AnsDispatchParams.nIntWb, Valid(UInt(params.physicalRegWidth.W))))
-  val wbPregsFp     = Input(Vec(AnsDispatchParams.nFpWb, Valid(UInt(params.physicalRegWidth.W))))
-  val wakeUpAll     = Input(new AnsIQWakeUpVec(params))
-  val s0Cancel      = Input(Vec(AnsDispatchParams.nExu, new CancelSignal(params)))
-  val ldCancel      = Input(Vec(params.loadPipelineWidth, new LoadCancel))
-  val fromMem       = Input(new AnsMemToDispatchBundle(params))
-  val singleStep    = Input(Bool())
-  val fromCsr       = Input(new AnsCsrDecodeState)
+  val IQValidNumVec         = Input(Vec(AnsIssueParams.nExu, UInt(AnsDispatchParams.iqValidNumWidth.W)))
+  val wbPregsInt            = Input(Vec(AnsDispatchParams.nIntWb, Valid(UInt(params.physicalRegWidth.W))))
+  val wbPregsFp             = Input(Vec(AnsDispatchParams.nFpWb, Valid(UInt(params.physicalRegWidth.W))))
+  val wakeUpAll             = Input(new AnsIQWakeUpVec(params))
+  val data0CancelToDispatch = Input(Vec(AnsDispatchParams.nExu, new CancelSignal(params)))
+  val ldCancel              = Input(Vec(params.loadPipelineWidth, new LoadCancel))
+  val fromMem               = Input(new AnsMemToDispatchBundle(params))
+  val singleStep            = Input(Bool())
+  val fromCsr               = Input(new AnsCsrDecodeState)
 
   val debug = Output(new AnsCtrlBlockDebugIO(params))
 }
@@ -186,15 +186,15 @@ class AnsCtrlBlock(val params: BundleParams = BundleParams()) extends Module {
     dispatch.io.renameIn(lane).bits  := renameBits(lane)
   }
 
-  dispatch.io.redirect      := io.redirect
-  dispatch.io.IQValidNumVec := io.IQValidNumVec
-  dispatch.io.wbPregsInt    := io.wbPregsInt
-  dispatch.io.wbPregsFp     := io.wbPregsFp
-  dispatch.io.wakeUpAll     := io.wakeUpAll
-  dispatch.io.s0Cancel      := io.s0Cancel
-  dispatch.io.ldCancel      := io.ldCancel
-  dispatch.io.fromMem       := io.fromMem
-  dispatch.io.singleStep    := io.singleStep
+  dispatch.io.redirect              := io.redirect
+  dispatch.io.IQValidNumVec         := io.IQValidNumVec
+  dispatch.io.wbPregsInt            := io.wbPregsInt
+  dispatch.io.wbPregsFp             := io.wbPregsFp
+  dispatch.io.wakeUpAll             := io.wakeUpAll
+  dispatch.io.data0CancelToDispatch := io.data0CancelToDispatch
+  dispatch.io.ldCancel              := io.ldCancel
+  dispatch.io.fromMem               := io.fromMem
+  dispatch.io.singleStep            := io.singleStep
 
   for (port <- 0 until AnsDispatchParams.IQEnqSum) {
     io.toIssueQueues(port).valid          := dispatch.io.toIssueQueues(port).valid

@@ -2,8 +2,8 @@
  *
  * 只跟踪确定延迟 FU：表项 k 表示"k 拍后该 FU（或该写回口）仍被占用"。
  * 每个出队口 / 写回口按端口自动裁剪：
- *   - 一个端口只有一种固定延迟（或全是非确定延迟）时不生成忙表；
- *   - 多种固定延迟共享端口时才保留。
+ *   - FU 端口有多种固定延迟时才生成本地忙表；
+ *   - WB 端口只要有固定延迟写回就输出预约向量，供中央忙表处理跨 EXU 冲突。
  */
 package ansercore.backend.issue
 
@@ -12,18 +12,19 @@ import chisel3.util._
 
 import ansercore.backend.Bundles._
 
-/** 写侧：出队时预约延迟槽，S0/S1 block 时释放。 */
+/** 写侧：出队时预约延迟槽，data0/data1 block 时释放。 */
 class AnsFuBusyTableWrite(
   val fuLatencyMap: Map[Int, Int],
   val tableSize:    Int,
 ) extends Module {
   require(tableSize >= 2)
+  require(fuLatencyMap.values.forall(lat => lat >= 0 && lat < tableSize), "FU latency exceeds busy-table capacity")
 
   val io = IO(new Bundle {
     val deqValid  = Input(Bool())
     val deqFuType = Input(FuType())
-    val og0Resp   = Flipped(Valid(new IssueEntryResponse()))
-    val og1Resp   = Flipped(Valid(new IssueEntryResponse()))
+    val data0Resp = Flipped(Valid(new IssueEntryResponse()))
+    val data1Resp = Flipped(Valid(new IssueEntryResponse()))
     val busyTable = Output(UInt(tableSize.W))
     val deqSet    = Output(UInt(tableSize.W))
   })
@@ -38,19 +39,19 @@ class AnsFuBusyTableWrite(
       latMapped.getOrElse(lat, Seq.empty).map(f => fuType === f.U).foldLeft(false.B)(_ || _)
     }).asUInt
 
-  val deqMatch = matchVec(io.deqFuType)
-  val og0Match = matchVec(io.og0Resp.bits.fuType)
-  val og1Match = matchVec(io.og1Resp.bits.fuType)
+  val deqMatch   = matchVec(io.deqFuType)
+  val data0Match = matchVec(io.data0Resp.bits.fuType)
+  val data1Match = matchVec(io.data1Resp.bits.fuType)
 
-  val og0Fail = io.og0Resp.valid && !io.og0Resp.bits.ready
-  val og1Fail = io.og1Resp.valid && !io.og1Resp.bits.ready
+  val data0Fail = io.data0Resp.valid && !io.data0Resp.bits.ready
+  val data1Fail = io.data1Resp.valid && !io.data1Resp.bits.ready
 
-  val shift         = (table >> 1).asUInt
-  val deqSetShift   = Mux(io.deqValid, deqMatch >> 1, 0.U(tableSize.W))
-  val og0ClearShift = Mux(og0Fail, og0Match >> 2, 0.U(tableSize.W))
-  val og1ClearShift = Mux(og1Fail, og1Match >> 3, 0.U(tableSize.W))
+  val shift           = (table >> 1).asUInt
+  val deqSetShift     = Mux(io.deqValid, deqMatch >> 1, 0.U(tableSize.W))
+  val data0ClearShift = Mux(data0Fail, data0Match >> 2, 0.U(tableSize.W))
+  val data1ClearShift = Mux(data1Fail, data1Match >> 3, 0.U(tableSize.W))
 
-  table := shift & (~og0ClearShift).asUInt & (~og1ClearShift).asUInt | deqSetShift
+  table := shift & (~data0ClearShift).asUInt & (~data1ClearShift).asUInt | deqSetShift
 
   io.busyTable := table
   io.deqSet    := Mux(io.deqValid, deqMatch, 0.U(tableSize.W))
@@ -62,6 +63,8 @@ class AnsFuBusyTableRead(
   val numEntries:   Int,
   val tableSize:    Int,
 ) extends Module {
+  require(numEntries > 0 && tableSize >= 2)
+  require(fuLatencyMap.values.forall(lat => lat >= 0 && lat < tableSize), "FU latency exceeds busy-table capacity")
   val io = IO(new Bundle {
     val fuBusyTable = Input(UInt(tableSize.W))
     val fuTypeVec   = Input(Vec(numEntries, FuType()))

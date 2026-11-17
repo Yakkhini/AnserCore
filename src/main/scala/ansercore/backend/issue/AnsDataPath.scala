@@ -1,10 +1,10 @@
-/* DataPath：IssueQueue 之后、EXU 之前的 S0/S1 两级。
+/* DataPath：IssueQueue 之后、EXU 之前的 data0/data1 两级。
  *
- * S0：PRF 读口仲裁、WB 端口冲突检查、PC/target 查询；
- * S1：按 dataSources 选择 PRF / RegCache / forward / bypass / imm / zero，
- *     填好 ExuInput 送给执行单元，并产生 S0/S1 响应与 cancel。
+ * data0：PRF 读口仲裁、WB 端口冲突检查、PC/target 查询；
+ * data1：按 dataSources 选择 PRF / RegCache / forward / bypass / imm / zero，
+ *     填好 ExuInput 送给执行单元，并产生 data0/data1 响应与 cancel。
  *
- * 本版没有 forward 同拍发射（IQ 唤醒在 Scheduler 统一打一拍），因此
+ * 本版没有 forward 同拍发射（IQ 唤醒在 Backend 统一打一拍），因此
  * DataSource.forward 仍保留但在本实现中不会从 IQ 产生。
  */
 package ansercore.backend.issue
@@ -15,36 +15,34 @@ import chisel3.util._
 import ansercore.backend.Bundles._
 import ansercore.backend.rename.{AnsRenameParams, AnsRenameRedirect}
 
+object AnsDataPath {
+
+  /** 静态 PRF 读口映射：一个 EXU 的源槽使用哪个物理读口。 */
+  final case class ReadPortMember(exuIdx: Int, srcIdx: Int, portIdx: Int)
+}
+
 class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
+  import AnsDataPath.ReadPortMember
+
+  AnsIssueParams.validate(params)
   val io = IO(new AnsDataPathIO(params))
 
   val nExu   = AnsIssueParams.nExu
   val numSrc = params.numSrc
 
-  val intRdGroups: Map[Int, Seq[(Int, Int)]] =
-    (0 until nExu)
-      .flatMap { e =>
-        val exu = AnsIssueParams.exuByIndex(e)
-        (0 until numSrc).map(s => (e, s, exu.intRdPorts(s))).filter(_._3 >= 0)
+  def readPortGroups(portsOf: AnsExuParams => Seq[Int]): Map[Int, Seq[ReadPortMember]] =
+    AnsIssueParams.allExus
+      .flatMap { exu =>
+        portsOf(exu).zipWithIndex.collect {
+          case (port, src) if port >= 0 => ReadPortMember(exu.exuIdx, src, port)
+        }
       }
-      .groupBy(_._3)
-      .view
-      .mapValues(_.map(x => (x._1, x._2)).toSeq)
-      .toMap
+      .groupBy(_.portIdx)
 
-  val fpRdGroups: Map[Int, Seq[(Int, Int)]] =
-    (0 until nExu)
-      .flatMap { e =>
-        val exu = AnsIssueParams.exuByIndex(e)
-        (0 until numSrc).map(s => (e, s, exu.fpRdPorts(s))).filter(_._3 >= 0)
-      }
-      .groupBy(_._3)
-      .view
-      .mapValues(_.map(x => (x._1, x._2)).toSeq)
-      .toMap
-
-  val nIntRd = intRdGroups.keys.foldLeft(0)(_ max _) + 1
-  val nFpRd  = fpRdGroups.keys.foldLeft(0)(_ max _) + 1
+  val intRdGroups = readPortGroups(_.intRdPorts)
+  val fpRdGroups  = readPortGroups(_.fpRdPorts)
+  val nIntRd      = AnsIssueParams.nIntRd
+  val nFpRd       = AnsIssueParams.nFpRd
 
   // ------------------------------------------------------------------
   // PRF
@@ -76,62 +74,57 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
     fpGrant(e)(s)  := true.B
   }
 
-  for ((port, members) <- intRdGroups) {
-    val req  = members.map { case (e, s) =>
-      io.fromIQ(e).valid &&
-      SrcType.isInteger(io.fromIQ(e).bits.srcType(s)) &&
-      DataSource.readReg(io.fromIQ(e).bits.common.dataSources(s))
-    }
-    val addr = members.map { case (e, s) => io.fromIQ(e).bits.psrc(s) }
-    intRfRaddr(port) := Mux1H(req, addr)
-    members.zipWithIndex.foreach { case ((e, s), i) =>
-      intGrant(e)(s) := !req(i) || PriorityEncoder(VecInit(req)) === i.U
+  /** 地址与授权使用同一个 one-hot 获胜者；组内顺序为 EXU 编号、源槽编号。 */
+  def connectReadPorts(
+    groups:       Map[Int, Seq[ReadPortMember]],
+    isSourceType: UInt => Bool,
+    addresses:    Vec[UInt],
+    grants:       Vec[Vec[Bool]],
+  ): Unit = {
+    addresses.foreach(_ := 0.U)
+    for ((port, members) <- groups.toSeq.sortBy(_._1)) {
+      val requests           = members.map { member =>
+        val in = io.fromIQ(member.exuIdx)
+        in.valid && isSourceType(in.bits.srcType(member.srcIdx)) &&
+        DataSource.readReg(in.bits.common.dataSources(member.srcIdx))
+      }
+      val winnerOH           = PriorityEncoderOH(VecInit(requests).asUInt)
+      val requestedAddresses = members.map(m => io.fromIQ(m.exuIdx).bits.psrc(m.srcIdx))
+      addresses(port) := Mux1H(winnerOH, requestedAddresses)
+      members.zipWithIndex.foreach { case (member, i) =>
+        grants(member.exuIdx)(member.srcIdx) := !requests(i) || winnerOH(i)
+      }
     }
   }
 
-  for ((port, members) <- fpRdGroups) {
-    val req  = members.map { case (e, s) =>
-      io.fromIQ(e).valid &&
-      SrcType.isFloating(io.fromIQ(e).bits.srcType(s)) &&
-      DataSource.readReg(io.fromIQ(e).bits.common.dataSources(s))
-    }
-    val addr = members.map { case (e, s) => io.fromIQ(e).bits.psrc(s) }
-    fpRfRaddr(port) := Mux1H(req, addr)
-    members.zipWithIndex.foreach { case ((e, s), i) =>
-      fpGrant(e)(s) := !req(i) || PriorityEncoder(VecInit(req)) === i.U
-    }
-  }
+  connectReadPorts(intRdGroups, SrcType.isInteger, intRfRaddr, intGrant)
+  connectReadPorts(fpRdGroups, SrcType.isFloating, fpRfRaddr, fpGrant)
 
   val intRfRdata = RegNext(VecInit(intRfRaddr.map(a => intRf(a))))
   val fpRfRdata  = RegNext(VecInit(fpRfRaddr.map(a => fpRf(a))))
 
-  // 同拍写回口优先级：共享同一写口的多个候选只放行编号最小者，其余 S0 block。
-  val intWbWin = Wire(Vec(nExu, Bool()))
-  val fpWbWin  = Wire(Vec(nExu, Bool()))
-  for (e <- 0 until nExu) {
-    intWbWin(e) := true.B
-    fpWbWin(e)  := true.B
-  }
-  for (p <- 0 until AnsIssueParams.nIntWb) {
-    val members = AnsIssueParams.allExus.filter(_.intWbPort == p)
-    if (members.nonEmpty) {
-      val req = members.map(e => io.fromIQ(e.exuIdx).valid && io.fromIQ(e.exuIdx).bits.common.intWen)
-      val win = PriorityEncoder(VecInit(req))
-      members.zipWithIndex.foreach { case (e, i) =>
-        intWbWin(e.exuIdx) := !req(i) || win === i.U
+  // 同拍写回口优先级：共享同一写口的多个候选只放行编号最小者，其余 data0 block。
+  def writebackWinners(
+    numPorts: Int,
+    portOf:   AnsExuParams => Int,
+    writes:   IssueQueueIssueBundle => Bool,
+  ): Vec[Bool] = {
+    val winners = WireInit(VecInit(Seq.fill(nExu)(true.B)))
+    for (port <- 0 until numPorts) {
+      val members = AnsIssueParams.allExus.filter(e => portOf(e) == port)
+      if (members.nonEmpty) {
+        val requests = members.map(e => io.fromIQ(e.exuIdx).valid && writes(io.fromIQ(e.exuIdx).bits))
+        val winnerOH = PriorityEncoderOH(VecInit(requests).asUInt)
+        members.zipWithIndex.foreach { case (exu, i) =>
+          winners(exu.exuIdx) := !requests(i) || winnerOH(i)
+        }
       }
     }
+    winners
   }
-  for (p <- 0 until AnsIssueParams.nFpWb) {
-    val members = AnsIssueParams.allExus.filter(_.fpWbPort == p)
-    if (members.nonEmpty) {
-      val req = members.map(e => io.fromIQ(e.exuIdx).valid && io.fromIQ(e.exuIdx).bits.common.fpWen)
-      val win = PriorityEncoder(VecInit(req))
-      members.zipWithIndex.foreach { case (e, i) =>
-        fpWbWin(e.exuIdx) := !req(i) || win === i.U
-      }
-    }
-  }
+
+  val intWbWin = writebackWinners(AnsIssueParams.nIntWb, _.intWbPort, _.common.intWen)
+  val fpWbWin  = writebackWinners(AnsIssueParams.nFpWb, _.fpWbPort, _.common.fpWen)
 
   // ------------------------------------------------------------------
   // RegCache（先保留端口；IQ 当前不产生 regcache 数据源）
@@ -162,10 +155,10 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
 
   pcMem.io.write := io.pcMemWrite
   pcExus.zipWithIndex.foreach { case (e, i) =>
-    val s0 = io.fromIQ(e.exuIdx)
-    pcMem.io.read(i).valid     := s0.valid
-    pcMem.io.read(i).ftqPtr    := s0.bits.common.ftqPtr
-    pcMem.io.read(i).ftqOffset := s0.bits.common.ftqOffset
+    val data0 = io.fromIQ(e.exuIdx)
+    pcMem.io.read(i).valid     := data0.valid
+    pcMem.io.read(i).ftqPtr    := data0.bits.common.ftqPtr
+    pcMem.io.read(i).ftqOffset := data0.bits.common.ftqOffset
   }
 
   // ------------------------------------------------------------------
@@ -178,32 +171,34 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
   io.toIq.wbConflict := wbBusy.io.conflict
 
   // ------------------------------------------------------------------
-  // S0 / S1
+  // data0 / data1
   // ------------------------------------------------------------------
   val issueShape = io.fromIQ(0).bits.cloneType
-  val s1Valid    = RegInit(VecInit(Seq.fill(nExu)(false.B)))
-  val s1Data     = Reg(Vec(nExu, issueShape))
+  val data1Valid = RegInit(VecInit(Seq.fill(nExu)(false.B)))
+  val data1Data  = Reg(Vec(nExu, issueShape))
 
   val exuOutBypass1 = RegNext(io.exuOutput)
   val exuOutBypass2 = RegNext(exuOutBypass1)
   val prevFlush     = RegNext(io.flush)
 
   for (e <- 0 until nExu) {
-    val exu = AnsIssueParams.exuByIndex(e)
-    val s0  = io.fromIQ(e)
+    val exu   = AnsIssueParams.exuByIndex(e)
+    val data0 = io.fromIQ(e)
 
     val srcNotBlock = (0 until numSrc)
       .map { s =>
         if (exu.intRdPorts(s) >= 0 || exu.fpRdPorts(s) >= 0) {
           val intOk =
             if (exu.intRdPorts(s) >= 0)
-              !SrcType.isInteger(s0.bits.srcType(s)) || !DataSource.readReg(s0.bits.common.dataSources(s)) || intGrant(
+              !SrcType
+                .isInteger(data0.bits.srcType(s)) || !DataSource.readReg(data0.bits.common.dataSources(s)) || intGrant(
                 e
               )(s)
             else true.B
           val fpOk  =
             if (exu.fpRdPorts(s) >= 0)
-              !SrcType.isFloating(s0.bits.srcType(s)) || !DataSource.readReg(s0.bits.common.dataSources(s)) || fpGrant(
+              !SrcType
+                .isFloating(data0.bits.srcType(s)) || !DataSource.readReg(data0.bits.common.dataSources(s)) || fpGrant(
                 e
               )(s)
             else true.B
@@ -212,51 +207,52 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
       }
       .reduce(_ && _)
 
-    val wbOk     = (!s0.bits.common.intWen || intWbWin(e)) &&
-      (!s0.bits.common.fpWen || fpWbWin(e))
+    val wbOk     = (!data0.bits.common.intWen || intWbWin(e)) &&
+      (!data0.bits.common.fpWen || fpWbWin(e))
     val notBlock = srcNotBlock && wbOk
 
-    val s1EntryFlush = AnsIssueUtils.needFlush(s0.bits.common.robIdx, io.flush) ||
-      AnsIssueUtils.needFlush(s0.bits.common.robIdx, prevFlush)
-    val s1OutFlush   = AnsIssueUtils.needFlush(s1Data(e).common.robIdx, io.flush) ||
-      AnsIssueUtils.needFlush(s1Data(e).common.robIdx, prevFlush)
+    val data1EntryFlush = AnsIssueUtils.needFlush(data0.bits.common.robIdx, io.flush) ||
+      AnsIssueUtils.needFlush(data0.bits.common.robIdx, prevFlush)
+    val data1OutFlush   = AnsIssueUtils.needFlush(data1Data(e).common.robIdx, io.flush) ||
+      AnsIssueUtils.needFlush(data1Data(e).common.robIdx, prevFlush)
 
-    io.toIq.data0Resp(e).valid       := s0.valid
-    io.toIq.data0Resp(e).bits.ready  := notBlock
-    io.toIq.data0Resp(e).bits.robIdx := s0.bits.common.robIdx
-    io.toIq.data0Resp(e).bits.fuType := s0.bits.common.fuType
-    io.toIq.data0Cancel(e)           := s0.valid && !notBlock
-    io.toIq.s0Cancel(e).intWen       := s0.valid && !notBlock && s0.bits.common.intWen
-    io.toIq.s0Cancel(e).fpWen        := s0.valid && !notBlock && s0.bits.common.fpWen
-    io.toIq.s0Cancel(e).pdest        := s0.bits.common.pdest
+    io.toIq.data0Resp(e).valid              := data0.valid
+    io.toIq.data0Resp(e).bits.ready         := notBlock
+    io.toIq.data0Resp(e).bits.robIdx        := data0.bits.common.robIdx
+    io.toIq.data0Resp(e).bits.fuType        := data0.bits.common.fuType
+    io.toIq.data0Cancel(e)                  := data0.valid && !notBlock
+    io.toIq.data0CancelToDispatch(e).intWen := data0.valid && !notBlock && data0.bits.common.intWen
+    io.toIq.data0CancelToDispatch(e).fpWen  := data0.valid && !notBlock && data0.bits.common.fpWen
+    io.toIq.data0CancelToDispatch(e).pdest  := data0.bits.common.pdest
 
-    s0.ready := true.B
+    // 接收即消费本次尝试；失败由响应通知 IQ 重试，不在 data0/data1 保持等待。
+    data0.ready := true.B
 
-    s1Valid(e) := s0.valid && notBlock && !s1EntryFlush
-    when(s0.valid && notBlock && !s1EntryFlush) {
-      s1Data(e) := s0.bits
+    data1Valid(e) := data0.fire && notBlock && !data1EntryFlush
+    when(data0.fire && notBlock && !data1EntryFlush) {
+      data1Data(e) := data0.bits
     }
 
-    io.toIq.data1Resp(e).valid       := s1Valid(e)
-    io.toIq.data1Resp(e).bits.ready  := Mux(s1OutFlush, true.B, io.toExu(e).ready)
-    io.toIq.data1Resp(e).bits.robIdx := s1Data(e).common.robIdx
-    io.toIq.data1Resp(e).bits.fuType := s1Data(e).common.fuType
-    io.toIq.data1Cancel(e)           := s1Valid(e) && !s1OutFlush && !io.toExu(e).ready
+    io.toIq.data1Resp(e).valid       := data1Valid(e)
+    io.toIq.data1Resp(e).bits.ready  := Mux(data1OutFlush, true.B, io.toExu(e).ready)
+    io.toIq.data1Resp(e).bits.robIdx := data1Data(e).common.robIdx
+    io.toIq.data1Resp(e).bits.fuType := data1Data(e).common.fuType
+    io.toIq.data1Cancel(e)           := data1Valid(e) && !data1OutFlush && !io.toExu(e).ready
     io.toIq.rcDest(e)                := (if (exu.intWbPort >= 0) rc.io.replaceIdx(exu.intWbPort) else 0.U)
 
-    // ---- S1 operand selection ----
-    val exuIn = WireInit(s1Data(e).common)
+    // ---- data1 operand selection ----
+    val exuIn = WireInit(data1Data(e).common)
 
     def exuSelect(srcIdx: Int, dataVec: Seq[UInt], validVec: Seq[Bool]): UInt = {
       val oh = (0 until nExu).map { p =>
-        s1Data(e).common.exuSources(srcIdx) === (p + 1).U
+        data1Data(e).common.exuSources(srcIdx) === (p + 1).U
       }
       Mux1H(oh, (0 until nExu).map(p => Mux(validVec(p), dataVec(p), 0.U)))
     }
 
     for (s <- 0 until numSrc) {
-      val ds      = s1Data(e).common.dataSources(s)
-      val srcType = s1Data(e).srcType(s)
+      val ds      = data1Data(e).common.dataSources(s)
+      val srcType = data1Data(e).srcType(s)
       val intPort = exu.intRdPorts(s)
       val fpPort  = exu.fpRdPorts(s)
       val intSel  = if (intPort >= 0) SrcType.isInteger(srcType) else false.B
@@ -269,7 +265,7 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
         ),
       )
       val rcData  = rcRdata(e * numSrc + s)
-      val imm     = ImmPacking.extend(s1Data(e).common.imm, s1Data(e).common.immType, params.xlen)
+      val imm     = ImmPacking.extend(data1Data(e).common.imm, data1Data(e).common.immType, params.xlen)
       // forward 需要 EXU 组合输出；当前 IQ 唤醒打一拍，只用 1/2 拍旁路，
       // 这里不复用 io.exuOutput 的组合路径，避免组合环。
       val fwd     = 0.U(params.xlen.W)
@@ -295,7 +291,7 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
       exuIn.predictTarget := pcMem.io.read(port).target
     }
 
-    io.toExu(e).valid := s1Valid(e) && !s1OutFlush
+    io.toExu(e).valid := data1Valid(e) && !data1OutFlush
     io.toExu(e).bits  := exuIn
   }
 

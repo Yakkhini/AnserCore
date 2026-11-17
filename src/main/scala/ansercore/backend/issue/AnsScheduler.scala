@@ -5,7 +5,10 @@
  *   - 汇总 PRF 写回唤醒并分发到每个 IQ；
  *   - 按 exuIdx 连接跨 Scheduler 的 IQ 唤醒；
  *   - 把 DataPath 的 data0/data1 响应、cancel 信号送回对应 IQ；
- *   - MemScheduler 额外负责 STA0 -> STD0 的 uop 复制（store data 复用地址源）。
+ *   - MemScheduler 额外负责 STA0 -> STD0 的 uop 复制（将 store data 源搬到 STD 的 slot0）。
+ *
+ * 结构对齐香山的 SchedulerImpBase / SchedulerArithImp / SchedulerMemImp：
+ * 公共连线在 Base，Dispatch 入队路径按 Scheduler 类型特化，由工厂选择实现类。
  */
 package ansercore.backend.issue
 
@@ -14,21 +17,28 @@ import chisel3.util._
 
 import ansercore.backend.Bundles._
 
-class AnsScheduler(
+abstract class AnsSchedulerBase(
   val params: BundleParams = BundleParams(),
   val schd:   AnsSchedulerParams,
 ) extends Module {
+  import AnsScheduler.DispatchPort
+
+  schd.validate(params)
   val io = IO(new AnsSchedulerIO(params, schd))
 
-  val nExu     = AnsIssueParams.nExu
-  val iqs      = schd.iqs.map(p => Module(new AnsIssueQueue(params, p)))
-  val iqByName = schd.iqs.zip(iqs).map { case (p, m) => p.name -> m }.toMap
+  val nExu = AnsIssueParams.nExu
 
-  for {
-    sta <- schd.iqs.find(_.name == "STA0")
-    std <- schd.iqs.find(_.name == "STD0")
-  } {
-    require(sta.numEnq == std.numEnq, "STA0 and STD0 must have the same enqueue width")
+  protected val iqs: Seq[AnsIssueQueue] =
+    schd.iqs.map(p => Module(new AnsIssueQueue(params, p)))
+
+  protected val iqByName: Map[String, AnsIssueQueue] =
+    schd.iqs.zip(iqs).map { case (p, m) => p.name -> m }.toMap
+
+  protected val dispatchFedPorts: Seq[DispatchPort] = {
+    val bases = schd.dispatchIQs.scanLeft(0)(_ + _.numEnq).init
+    schd.dispatchIQs.zip(bases).flatMap { case (p, base) =>
+      (0 until p.numEnq).map(e => DispatchPort(iqByName(p.name), e, base + e))
+    }
   }
 
   // ---- 默认输出 ----
@@ -56,39 +66,10 @@ class AnsScheduler(
     wbWakeups(AnsIssueParams.nIntWb + k).bits.pdest  := wb.addr
   }
 
-  // ---- Dispatch 入队 ----
-  val dispatchFed          = schd.iqs.filterNot(_.name == "STD0")
-  private var dispatchPort = 0
-  dispatchFed.zipWithIndex.foreach { case (iqParams, iqPos) =>
-    val iq = iqByName(iqParams.name)
-    for (e <- 0 until iqParams.numEnq) {
-      val isSta = schd.schdType == AnsMemScheduler && iqParams.name == "STA0"
-      if (isSta) {
-        val std    = iqByName("STD0")
-        val in     = io.fromDispatch(dispatchPort)
-        // STA 只需要地址源 rs1；store data 由 STD0 单独跟踪。
-        val staUop = WireInit(in.bits)
-        staUop.srcType(1)   := SrcType.none.U
-        staUop.srcState(1)  := SourceState.ready.U
-        iq.io.enq(e).valid  := in.valid
-        iq.io.enq(e).bits   := staUop
-        std.io.enq(e).valid := in.valid
-        std.io.enq(e).bits  := AnsScheduler.makeStdUop(in.bits)
-        in.ready            := iq.io.enq(e).ready && std.io.enq(e).ready
-      } else {
-        val in = io.fromDispatch(dispatchPort)
-        iq.io.enq(e).valid := in.valid
-        iq.io.enq(e).bits  := in.bits
-        in.ready           := iq.io.enq(e).ready
-      }
-      dispatchPort += 1
-    }
-  }
-  require(dispatchPort == schd.dispatchEnqPorts, "dispatch port accounting mismatch")
-
   // ---- 逐 IQ 连接 ----
-  private var deqPortIdx = 0
-  schd.iqs.zip(iqs).foreach { case (iqParams, iq) =>
+  private val deqPortOffsets = schd.iqs.scanLeft(0)(_ + _.numDeq)
+  require(deqPortOffsets.last == schd.numDeqPorts, "dequeue port accounting mismatch")
+  schd.iqs.zip(iqs).zip(deqPortOffsets.init).foreach { case ((iqParams, iq), deqBase) =>
     iq.io.flush        := io.flush
     iq.io.ldCancel     := io.ldCancel
     iq.io.data0Cancel  := io.fromDataPath.data0Cancel
@@ -98,6 +79,7 @@ class AnsScheduler(
     }
 
     iqParams.exus.zipWithIndex.foreach { case (exu, d) =>
+      val deqPortIdx = deqBase + d
       iq.io.data0Resp(d)       := io.fromDataPath.data0Resp(exu.exuIdx)
       iq.io.data1Resp(d)       := io.fromDataPath.data1Resp(exu.exuIdx)
       iq.io.wbBusyTableRead(d) := io.wbBusyTableRead(exu.exuIdx)
@@ -107,7 +89,6 @@ class AnsScheduler(
       io.deq(deqPortIdx).valid := iq.io.deq(d).valid
       io.deq(deqPortIdx).bits  := iq.io.deq(d).bits
       iq.io.deq(d).ready       := io.deq(deqPortIdx).ready
-      deqPortIdx += 1
 
       io.wakeupOut(exu.exuIdx).valid       := iq.io.wakeupToIQ(d).valid
       io.wakeupOut(exu.exuIdx).bits        := iq.io.wakeupToIQ(d).bits
@@ -116,20 +97,109 @@ class AnsScheduler(
       io.IQValidNumVec(exu.exuIdx) := iq.io.validCntDeqVec(d)
     }
   }
-  require(deqPortIdx == schd.numDeqPorts, "dequeue port accounting mismatch")
+
+  // ---- Dispatch 入队 ----
+
+  /** 为给定的 Dispatch 直连口整束接线；特化入队口由子类单独连接。 */
+  final protected def bulkConnectDispatch(ports: Seq[DispatchPort]): Unit =
+    ports.foreach { port =>
+      port.iq.io.enq(port.enqSlot) <> io.fromDispatch(port.dispatchPort)
+    }
+
+  /** 由具体子类在构造末尾调用，避免在基类构造器里调用抽象方法。 */
+  protected def connectDispatch(): Unit
+}
+
+/** 纯算术 Scheduler：Dispatch 直连口整束 `<>`。 */
+final class AnsSchedulerArith(
+  params: BundleParams = BundleParams(),
+  schd:   AnsSchedulerParams,
+) extends AnsSchedulerBase(params, schd) {
+  protected def connectDispatch(): Unit = bulkConnectDispatch(dispatchFedPorts)
+  connectDispatch()
+}
+
+/** Mem Scheduler：在直连口之外，把 STA0 的 uop 复制给 STD0。 */
+final class AnsSchedulerMem(
+  params: BundleParams = BundleParams(),
+  schd:   AnsSchedulerParams,
+) extends AnsSchedulerBase(params, schd) {
+  require(iqByName.contains("STA0"), s"${schd.schdType} must contain STA0")
+  require(iqByName.contains("STD0"), s"${schd.schdType} must contain STD0")
+  require(
+    iqByName("STA0").iq.numEnq == iqByName("STD0").iq.numEnq,
+    "STA0/STD0 enqueue width mismatch",
+  )
+
+  protected def connectDispatch(): Unit = {
+    bulkConnectDispatch(dispatchFedPorts.filterNot(_.iq.iq.name == "STA0"))
+    connectStaToStd()
+  }
+  connectDispatch()
+
+  /** 把 STA0 的入队 uop 派生一份给 STD0。
+    *
+    * Dispatch 的 store uop: slot0 = rs1（地址），slot1 = rs2（store data）。 STA 只保留地址源；STD 只保留搬到 slot0 的 store data。两份 uop
+    * 均从原始输入构造，各目标端口只连接一次。
+    */
+  private def connectStaToStd(): Unit = {
+    val srcIQ      = iqByName("STA0")
+    val dstIQ      = iqByName("STD0")
+    val srcSlot    = 1
+    val dstSlot    = 0
+    val dstNeutral = (0 until params.numSrc).filterNot(_ == dstSlot)
+    require(srcSlot < params.numSrc, s"store data slot $srcSlot out of range")
+
+    for (e <- 0 until srcIQ.iq.numEnq) {
+      val in = io.fromDispatch(schd.dispatchPortOf("STA0", e))
+
+      // STA 不使用 store data；清掉后不会等待它。
+      val staUop = WireInit(in.bits)
+      staUop.srcType(srcSlot)  := SrcType.none.U
+      staUop.srcState(srcSlot) := SourceState.ready.U
+      val stdUop = makeCopiedUop(in.bits, srcSlot, dstSlot, dstNeutral)
+
+      srcIQ.io.enq(e).valid := in.valid
+      srcIQ.io.enq(e).bits  := staUop
+      dstIQ.io.enq(e).valid := in.valid
+      dstIQ.io.enq(e).bits  := stdUop
+
+      // 两个队列都有空间时，才向 Dispatch 返回 ready。
+      in.ready := srcIQ.io.enq(e).ready && dstIQ.io.enq(e).ready
+    }
+  }
+
+  /** 把 srcSlot 的源字段组复制到 dstSlot；neutralize 中的槽置 none/ready。 */
+  private def makeCopiedUop(
+    uop:        DynInst,
+    srcSlot:    Int,
+    dstSlot:    Int,
+    neutralize: Seq[Int] = Nil,
+  ): DynInst = {
+    require(srcSlot != dstSlot, "copy slots must differ")
+    val out = WireInit(uop)
+    out.psrc(dstSlot)              := uop.psrc(srcSlot)
+    out.srcType(dstSlot)           := uop.srcType(srcSlot)
+    out.srcState(dstSlot)          := uop.srcState(srcSlot)
+    out.srcLoadDependency(dstSlot) := uop.srcLoadDependency(srcSlot)
+    out.useRegCache(dstSlot)       := uop.useRegCache(srcSlot)
+    out.regCacheIdx(dstSlot)       := uop.regCacheIdx(srcSlot)
+    for (s <- neutralize if s != dstSlot) {
+      out.srcType(s)  := SrcType.none.U
+      out.srcState(s) := SourceState.ready.U
+    }
+    out
+  }
 }
 
 object AnsScheduler {
 
-  /** Store Data 复用 Store Address 的 rs2：psrc(0) <- psrc(1)。 */
-  def makeStdUop(uop: DynInst): DynInst = {
-    val out = WireInit(uop)
-    out.psrc(0)              := uop.psrc(1)
-    out.srcType(0)           := uop.srcType(1)
-    out.srcState(0)          := uop.srcState(1)
-    out.srcLoadDependency(0) := uop.srcLoadDependency(1)
-    out.useRegCache(0)       := uop.useRegCache(1)
-    out.regCacheIdx(0)       := uop.regCacheIdx(1)
-    out
-  }
+  /** Elaboration 阶段的端口映射，不增加硬件寄存器。 */
+  final case class DispatchPort(iq: AnsIssueQueue, enqSlot: Int, dispatchPort: Int)
+
+  def apply(params: BundleParams, schd: AnsSchedulerParams): AnsSchedulerBase =
+    schd.schdType match {
+      case AnsMemScheduler                  => new AnsSchedulerMem(params, schd)
+      case AnsIntScheduler | AnsFpScheduler => new AnsSchedulerArith(params, schd)
+    }
 }

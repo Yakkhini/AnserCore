@@ -3,7 +3,7 @@
  * 本版只维护 ready/busy，不维护 loadDependency（见 Dispatch 计划）：
  * - 分配：pdest 置忙（同拍读口旁路）；
  * - 写回 / IQ 唤醒：置就绪；
- * - s0Cancel：重新置忙。
+ * - data0CancelToDispatch：重新置忙。
  * 表项用 busy/ready 编码：busy 表示未就绪，ready 表示已就绪。
  * 复位全 ready，与香山一致；整型物理寄存器 0 恒 ready。
  */

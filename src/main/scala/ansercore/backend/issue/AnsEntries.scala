@@ -101,10 +101,16 @@ class AnsEntries(
     entry.io.deqPortIdxWrite := deqPortIdx(e)
   }
 
-  val enqEntryOut    = enqEntries.map(_.io.entry)
-  val othersEntryOut = othersEntries.map(_.io.entry)
-  val enqCancel      = enqEntries.map(_.io.cancelBypass)
-  val othersCancel   = othersEntries.map(_.io.cancelBypass)
+  val issueCandidates = allEntries.map { entry =>
+    val candidate = Wire(new AnsSelectedEntry(params, iq))
+    candidate.entry          := entry.io.entry.bits
+    candidate.dataSources    := entry.io.dataSources
+    candidate.exuSources     := entry.io.exuSources
+    candidate.loadDependency := entry.io.loadDependency
+    candidate.isFirstIssue   := entry.io.isFirstIssue
+    candidate.cancel         := entry.io.cancelBypass
+    candidate
+  }
 
   for (d <- 0 until iq.numDeq) {
     val othersSel = io.othersEntryOldestSel(d)
@@ -112,27 +118,14 @@ class AnsEntries(
     io.deqEntry(d).valid := othersSel.valid || enqSel.valid
     io.deqEntry(d).bits  := Mux(
       othersSel.valid,
-      Mux1H(othersSel.bits, othersEntryOut.map(_.bits)),
-      Mux1H(enqSel.bits, enqEntryOut.map(_.bits)),
-    )
-    io.cancelDeqVec(d)   := Mux(
-      othersSel.valid,
-      Mux1H(othersSel.bits, othersCancel),
-      Mux1H(enqSel.bits, enqCancel),
-    )
-    io.isFirstIssue(d)   := Mux(
-      othersSel.valid,
-      Mux1H(othersSel.bits, othersEntries.map(_.io.isFirstIssue)),
-      Mux1H(enqSel.bits, enqEntries.map(_.io.isFirstIssue)),
+      Mux1H(othersSel.bits, issueCandidates.drop(numEnq)),
+      Mux1H(enqSel.bits, issueCandidates.take(numEnq)),
     )
   }
 
   // ---- 汇总状态 ----
-  io.valid          := VecInit(allEntries.map(_.io.valid)).asUInt
-  io.issued         := VecInit(allEntries.map(_.io.issued)).asUInt
-  io.canIssue       := VecInit(allEntries.map(_.io.canIssue)).asUInt
-  io.fuType         := VecInit(allEntries.map(_.io.fuType))
-  io.dataSources    := VecInit(allEntries.map(_.io.dataSources))
-  io.exuSources     := VecInit(allEntries.map(_.io.exuSources))
-  io.loadDependency := VecInit(allEntries.map(_.io.loadDependency))
+  io.valid    := VecInit(allEntries.map(_.io.valid)).asUInt
+  io.issued   := VecInit(allEntries.map(_.io.issued)).asUInt
+  io.canIssue := VecInit(allEntries.map(_.io.canIssue)).asUInt
+  io.fuType   := VecInit(allEntries.map(_.io.fuType))
 }
