@@ -31,39 +31,48 @@ DRAM_BACKEND := env_var_or_default("DRAM_BACKEND", "simple")
 dramsim3:
     #!/usr/bin/env zsh
     set -euo pipefail
-    home={{DRAMSIM3_HOME}}
-    if [[ ! -f $home/src/cosimulation.h ]]; then
-        mkdir -p "$(dirname $home)"
+    dram_dir={{ quote(DRAMSIM3_HOME) }}
+    if [[ ! -f $dram_dir/src/cosimulation.h ]]; then
+        mkdir -p "$(dirname "$dram_dir")"
         git clone --depth 1 --branch co-simulation \
-            https://github.com/OpenXiangShan/DRAMsim3.git "$home"
+            https://github.com/OpenXiangShan/DRAMsim3.git "$dram_dir"
     fi
-    cmake -S "$home" -B "$home/build" -DCOSIM=ON -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$home/build" --target dramsim3 -j "$NIX_BUILD_CORES"
+    cmake -S "$dram_dir" -B "$dram_dir/build" -DCOSIM=ON -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$dram_dir/build" --target dramsim3 -j "$NIX_BUILD_CORES"
 
 # Build the in-tree SoftFloat subset into out/lib/libsoftfloat.a.
 softfloat:
     #!/usr/bin/env zsh
     set -euo pipefail
     src=$PRJ_ROOT/rtl-sim/ext/softfloat
-    obj={{BUILD_DIR}}/softfloat
-    lib={{BUILD_DIR}}/lib/libsoftfloat.a
-    mkdir -p $obj {{BUILD_DIR}}/lib
+    obj={{ BUILD_DIR }}/softfloat
+    lib={{ BUILD_DIR }}/lib/libsoftfloat.a
+    mkdir -p $obj {{ BUILD_DIR }}/lib
     find $obj -name '*.o' -delete
     for file in $src/*.c; do
-        {{SIM_COMPILER}} -O3 -I$src -c $file -o $obj/${file:t:r}.o
+        {{ SIM_COMPILER }} -O3 -I$src -c $file -o $obj/${file:t:r}.o
     done
-    {{SIM_AR}} rcs $lib $obj/*.o
+    {{ SIM_AR }} rcs $lib $obj/*.o
 
 sv:
     #!/usr/bin/env zsh
+    set -e
     mill -i ansercore.run
     echo "SystemVerilog files are generated."
 
-_compile target: softfloat dramsim3 sv
+_compile target: softfloat sv
     #!/usr/bin/env zsh
-    mkdir -p {{BUILD_DIR}}/bin
-    mkdir -p {{BUILD_DIR}}/verilator
-    vsrc=(${(f)"$(find {{BUILD_DIR}}/verilog -name '*.sv')"})
+    set -euo pipefail
+    backend={{ quote(DRAM_BACKEND) }}
+    case "$backend" in
+        simple) ;;
+        dramsim3) just --justfile "$PRJ_ROOT/Justfile" DRAMSIM3_HOME={{ quote(DRAMSIM3_HOME) }} dramsim3 ;;
+        *) echo "unknown DRAM_BACKEND: $backend (expected simple or dramsim3)" >&2; exit 1 ;;
+    esac
+    obj_dir={{ BUILD_DIR }}/verilator/{{ target }}/$backend
+    mkdir -p "$obj_dir"
+    mkdir -p {{ BUILD_DIR }}/bin
+    vsrc=(${(f)"$(find {{ BUILD_DIR }}/verilog -name '*.sv')"})
     csrc_dirs=(
         $PRJ_ROOT/rtl-sim/platform
         $PRJ_ROOT/rtl-sim/service
@@ -79,12 +88,12 @@ _compile target: softfloat dramsim3 sv
 
     verilator_flags=(
         --cc
-        -Mdir {{BUILD_DIR}}/verilator/{{target}}
-        --top-module {{target}}
+        -Mdir "$obj_dir"
+        --top-module {{ target }}
         --prefix VTop
         --timescale 1ns/1ns
         --no-timing
-        --compiler {{SIM_COMPILER}}
+        --compiler {{ SIM_COMPILER }}
         -O3
         --x-assign fast
         --x-initial fast
@@ -95,14 +104,13 @@ _compile target: softfloat dramsim3 sv
         -Wno-UNOPTFLAT
         --trace-fst
         --exe
-        -o {{BUILD_DIR}}/bin/ansercore
+        -o ansercore
     )
     include_dirs=(
         $PRJ_ROOT/rtl-sim
-        {{BUILD_DIR}}/verilator
-        {{INC_DIR}}
-        {{CONFIG_DIR}}
-        {{DRAMSIM3_HOME}}/src
+        {{ BUILD_DIR }}/verilator
+        {{ INC_DIR }}
+        {{ CONFIG_DIR }}
         $PRJ_ROOT/rtl-sim/ext/softfloat
     )
     if [[ -n ${C_INCLUDE_PATH:-} ]]; then
@@ -112,22 +120,23 @@ _compile target: softfloat dramsim3 sv
         -g
         -O3
         -flto
-        -DCONFIG_TARGET_{{target}}
+        -DCONFIG_TARGET_{{ target }}
         -DEMU_TRACE_FST
     )
-    if [[ "{{DRAM_BACKEND}}" == "dramsim3" ]]; then
+    ld_flags=(
+        -flto
+        {{ BUILD_DIR }}/lib/libsoftfloat.a
+        -ldl
+        -pthread
+    )
+    if [[ "$backend" == "dramsim3" ]]; then
+        include_dirs+=({{ quote(DRAMSIM3_HOME) }}/src)
         cxx_flags+=(-DEMU_DRAMSIM3)
+        ld_flags+=({{ quote(DRAMSIM3_LIB) }})
     fi
     for dir in $include_dirs; do
         cxx_flags+=(-I$dir)
     done
-    ld_flags=(
-        -flto
-        {{BUILD_DIR}}/lib/libsoftfloat.a
-        {{DRAMSIM3_LIB}}
-        -ldl
-        -pthread
-    )
     cflags=()
     for flag in $cxx_flags; do
         cflags+=(-CFLAGS $flag)
@@ -138,13 +147,14 @@ _compile target: softfloat dramsim3 sv
     done
 
     verilator $verilator_flags $cflags $ldflags $vltsrc $csrc $vsrc
-    make -C {{BUILD_DIR}}/verilator/{{target}} -f VTop.mk -j $NIX_BUILD_CORES CXX={{SIM_CXX}} LINK={{SIM_LINK}} AR={{SIM_AR}}
+    make -C "$obj_dir" -f VTop.mk -j $NIX_BUILD_CORES CXX={{ SIM_CXX }} LINK={{ SIM_LINK }} AR={{ SIM_AR }}
+    ln -sfn "../verilator/{{ target }}/$backend/ansercore" {{ BUILD_DIR }}/bin/ansercore
 
 # Build the simulator only. `core-sim` runs the binary produced here.
 compile: (_compile "AnserCore")
 
 core-sim: compile
-    {{BUILD_DIR}}/bin/ansercore {{SIM_ARGS}}
+    {{ BUILD_DIR }}/bin/ansercore {{ SIM_ARGS }}
 
 clean:
     rm -rf out
