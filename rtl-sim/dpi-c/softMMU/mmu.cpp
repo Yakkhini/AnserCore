@@ -315,7 +315,7 @@ MmuResp Mmu::walk(const Access &access, uint64_t vaddr) const {
     }
     uint64_t ppn = (pte >> 10) & kPpnMask;
 
-    // 进行non-leaf pte 的检查 如果是non-leaf pte 的话 跳过
+    // 进行 non-leaf pte 的检查 如果是 non-leaf pte 的话 跳过
     if ((pte & (kPteR | kPteX)) == 0) {
       if (level == 0 || (pte & (kPteU | kPteA | kPteD)) != 0) {
         return fault(1, 0);
@@ -323,7 +323,7 @@ MmuResp Mmu::walk(const Access &access, uint64_t vaddr) const {
       table = ppn << 12;
       continue;
     }
-    // leaf-pte的检查
+    // leaf-pte 的检查
     bool user_page = (pte & kPteU) != 0;
 
     if (priv == Priv::kUser) {
@@ -346,7 +346,7 @@ MmuResp Mmu::walk(const Access &access, uint64_t vaddr) const {
     if (!permitted) {
       return fault(1, 0);
     }
-    // ppn 检查。 包括大页检查
+    // ppn 检查。包括大页检查
     unsigned dropped = static_cast<unsigned>(level) * kVpnBits;
     uint64_t low_mask = dropped == 0 ? 0 : (1ull << dropped) - 1;
     if ((ppn & low_mask) != 0) {
