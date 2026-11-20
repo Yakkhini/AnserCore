@@ -11,12 +11,12 @@ object ProbeModule {
   private val specs = mutable.LinkedHashMap.empty[String, ProbeSpec]
 
   def apply[T <: ProbeBundle](
-      gen: T,
-      kind: String,
-      sink: String,
-      extPrefix: String,
-      dontCare: Boolean = false,
-      delay: Int = 0
+    gen:       T,
+    kind:      String,
+    sink:      String,
+    extPrefix: String,
+    dontCare:  Boolean = false,
+    delay:     Int     = 0,
   ): T = {
     require(kind.nonEmpty && sink.nonEmpty && extPrefix.nonEmpty)
     val probe = Wire(gen)
@@ -25,7 +25,7 @@ object ProbeModule {
       probe := DontCare
       probe.elements.get("valid").foreach {
         case valid: Bool => valid := false.B
-        case _ =>
+        case _           =>
       }
     }
 
@@ -34,10 +34,10 @@ object ProbeModule {
       delayed = RegNext(delayed)
     }
 
-    val hw = ProbeDpi.flatten(delayed)
+    val hw   = ProbeDpi.flatten(delayed)
     require(
       hw.nonEmpty && hw.length <= ProbeDpi.maxWords,
-      s"${gen.desiredCppName} has ${hw.length} words; limit is ${ProbeDpi.maxWords}"
+      s"${gen.desiredCppName} has ${hw.length} words; limit is ${ProbeDpi.maxWords}",
     )
     val spec = ProbeSpec(
       kind,
@@ -45,9 +45,9 @@ object ProbeModule {
       extPrefix,
       gen.desiredModuleName,
       gen.desiredCppName,
-      hw.map { case (name, data) => ProbeField(name, data.getWidth) }
+      hw.map { case (name, data) => ProbeField(name, data.getWidth) },
     )
-    val key = s"$kind.${spec.moduleName}"
+    val key  = s"$kind.${spec.moduleName}"
     specs.get(key).foreach { old =>
       require(old == spec, s"$key changed")
     }
@@ -57,7 +57,6 @@ object ProbeModule {
   }
 
   // Writes probes.cpp and one Verilog black box per probe type.
-  def collect(cpu: String, outDir: String = "build/generated-src"): Unit = {
+  def collect(cpu: String, outDir: String = "build/generated-src"): Unit =
     ProbeFiles.write(cpu, specs.values.toSeq, outDir)
-  }
 }
