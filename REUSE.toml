@@ -9,6 +9,25 @@ path = [
 SPDX-FileCopyrightText = "2026 ECOS Team <ecos-all@ict.ac.cn>"
 SPDX-License-Identifier = "MulanPSL-2.0"
 
+[[annotations]]
+path = [
+    "rtl-sim/dpi-c/**",
+    "rtl-sim/platform/**",
+    "rtl-sim/scala/**",
+    "rtl-sim/service/**",
+    "rtl-sim/session/**",
+]
+SPDX-FileCopyrightText = "2026 ECOS Team <ecos-all@ict.ac.cn>"
+SPDX-License-Identifier = "MulanPSL-2.0"
+
+# Upstream notices in the individual source files give the exact years.
+# The host config.h carries its own SPDX header.
+[[annotations]]
+path = ["rtl-sim/ext/softfloat/*"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2011-2017 The Regents of the University of California"
+SPDX-License-Identifier = "BSD-3-Clause"
+
 # Markdown and reStructuredText documentation uses CC BY 4.0.
 [[annotations]]
 path = ["**/*.md", "**/*.rst", "docs/_static/dummy_file"]
