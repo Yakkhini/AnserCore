@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MulanPSL-2.0
  */
 
+#include <cstdio>
+#include <exception>
+
 #include "dpi-c/dpi.h"
 #include "session/options.h"
 #include "session/session.h"
@@ -23,8 +26,13 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  Session session(argc, argv);
-  session.run();
-  session.finish();
-  return session.state() != SessionState::kNormal;
+  try {
+    Session session(argc, argv);
+    session.run();
+    session.finish();
+    return session.state() != SessionState::kNormal;
+  } catch (const std::exception& error) {
+    std::fprintf(stderr, "%s\n", error.what());
+    return 1;
+  }
 }
