@@ -69,4 +69,3 @@ bool f64_lt_quiet( float64_t a, float64_t b )
             : (uiA != uiB) && (signA ^ (uiA < uiB));
 
 }
-

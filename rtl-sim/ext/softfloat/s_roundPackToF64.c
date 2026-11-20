@@ -114,4 +114,3 @@ float64_t
     return uZ.f;
 
 }
-

@@ -118,4 +118,3 @@ float32_t f32_sqrt( float32_t a )
     return uZ.f;
 
 }
-

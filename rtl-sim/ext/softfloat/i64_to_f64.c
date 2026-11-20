@@ -55,4 +55,3 @@ float64_t i64_to_f64( int64_t a )
     return softfloat_normRoundPackToF64( sign, 0x43C, absA );
 
 }
-

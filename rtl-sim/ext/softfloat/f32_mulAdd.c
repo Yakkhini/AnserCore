@@ -57,4 +57,3 @@ float32_t f32_mulAdd( float32_t a, float32_t b, float32_t c )
     return softfloat_mulAddF32( uiA, uiB, uiC, 0 );
 
 }
-

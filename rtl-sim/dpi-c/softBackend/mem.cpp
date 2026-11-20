@@ -281,4 +281,3 @@ ExecResult ideal_store_data(ExecContext* ctx, uint64_t addr, unsigned size,
                             uint64_t value) {
   return access(ctx, addr, size, true, &value);
 }
-

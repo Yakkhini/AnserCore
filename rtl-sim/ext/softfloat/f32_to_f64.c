@@ -90,4 +90,3 @@ float64_t f32_to_f64( float32_t a )
     return uZ.f;
 
 }
-

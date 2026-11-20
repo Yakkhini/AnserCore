@@ -66,4 +66,3 @@ struct uint128
 }
 
 #endif
-

@@ -63,4 +63,3 @@ bool f64_eq( float64_t a, float64_t b )
     return (uiA == uiB) || ! ((uiA | uiB) & UINT64_C( 0x7FFFFFFFFFFFFFFF ));
 
 }
-

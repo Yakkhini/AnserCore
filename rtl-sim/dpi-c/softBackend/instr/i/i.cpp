@@ -275,4 +275,3 @@ ExecResult exec_sraw(ExecContext* ctx) {
 ExecResult exec_fence(ExecContext*) { return {}; }
 ExecResult exec_fence_tso(ExecContext*) { return {}; }
 ExecResult exec_pause(ExecContext*) { return {}; }
-

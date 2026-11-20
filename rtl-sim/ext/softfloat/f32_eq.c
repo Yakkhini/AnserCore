@@ -63,4 +63,3 @@ bool f32_eq( float32_t a, float32_t b )
     return (uiA == uiB) || ! (uint32_t) ((uiA | uiB)<<1);
 
 }
-

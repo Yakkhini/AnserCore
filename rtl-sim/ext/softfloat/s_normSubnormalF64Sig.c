@@ -49,4 +49,3 @@ struct exp16_sig64 softfloat_normSubnormalF64Sig( uint_fast64_t sig )
     return z;
 
 }
-

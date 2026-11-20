@@ -77,4 +77,3 @@ uint_fast32_t
     return sign ? ui32_fromNegOverflow : ui32_fromPosOverflow;
 
 }
-

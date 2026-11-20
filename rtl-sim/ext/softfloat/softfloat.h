@@ -401,4 +401,3 @@ bool f128M_isSignalingNaN( const float128_t * );
 #endif
 
 #endif
-

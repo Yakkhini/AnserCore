@@ -169,4 +169,3 @@ float64_t f64_div( float64_t a, float64_t b )
     return uZ.f;
 
 }
-

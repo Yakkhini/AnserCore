@@ -63,4 +63,3 @@ bool f32_lt( float32_t a, float32_t b )
             : (uiA != uiB) && (signA ^ (uiA < uiB));
 
 }
-

@@ -93,4 +93,3 @@ int_fast64_t f32_to_i64( float32_t a, uint_fast8_t roundingMode, bool exact )
 #endif
 
 }
-

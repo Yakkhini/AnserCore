@@ -110,4 +110,3 @@ float32_t
     return uZ.f;
 
 }
-

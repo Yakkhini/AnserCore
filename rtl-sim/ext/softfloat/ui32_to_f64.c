@@ -56,4 +56,3 @@ float64_t ui32_to_f64( uint32_t a )
     return uZ.f;
 
 }
-

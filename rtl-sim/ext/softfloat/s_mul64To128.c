@@ -63,4 +63,3 @@ struct uint128 softfloat_mul64To128( uint64_t a, uint64_t b )
 }
 
 #endif
-

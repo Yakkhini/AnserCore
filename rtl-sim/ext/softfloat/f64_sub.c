@@ -71,4 +71,3 @@ float64_t f64_sub( float64_t a, float64_t b )
 #endif
 
 }
-

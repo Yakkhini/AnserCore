@@ -177,4 +177,3 @@ float32_t f32_div( float32_t a, float32_t b )
     return uZ.f;
 
 }
-

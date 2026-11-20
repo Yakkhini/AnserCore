@@ -62,4 +62,3 @@ float64_t i32_to_f64( int32_t a )
     return uZ.f;
 
 }
-

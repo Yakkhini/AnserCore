@@ -81,4 +81,3 @@ int_fast32_t
     return sign ? i32_fromNegOverflow : i32_fromPosOverflow;
 
 }
-

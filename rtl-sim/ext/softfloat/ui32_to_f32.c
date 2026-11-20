@@ -54,4 +54,3 @@ float32_t ui32_to_f32( uint32_t a )
     }
 
 }
-

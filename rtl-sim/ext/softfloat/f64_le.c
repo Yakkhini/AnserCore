@@ -64,4 +64,3 @@ bool f64_le( float64_t a, float64_t b )
             : (uiA == uiB) || (signA ^ (uiA < uiB));
 
 }
-

@@ -57,4 +57,3 @@ float64_t f64_mulAdd( float64_t a, float64_t b, float64_t c )
     return softfloat_mulAddF64( uiA, uiB, uiC, 0 );
 
 }
-

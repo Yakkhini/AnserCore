@@ -67,4 +67,3 @@ float32_t i64_to_f32( int64_t a )
     }
 
 }
-

@@ -123,4 +123,3 @@ float32_t softfloat_addMagsF32( uint_fast32_t uiA, uint_fast32_t uiB )
     return uZ.f;
 
 }
-

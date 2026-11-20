@@ -49,4 +49,3 @@ void softfloat_raiseFlags( uint_fast8_t flags )
     softfloat_exceptionFlags |= flags;
 
 }
-

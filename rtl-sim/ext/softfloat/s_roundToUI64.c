@@ -82,4 +82,3 @@ uint_fast64_t
     return sign ? ui64_fromNegOverflow : ui64_fromPosOverflow;
 
 }
-

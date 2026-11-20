@@ -55,4 +55,3 @@ float32_t i32_to_f32( int32_t a )
     return softfloat_normRoundPackToF32( sign, 0x9C, absA );
 
 }
-
