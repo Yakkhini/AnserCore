@@ -111,7 +111,7 @@ struct commonNaN {
 | Note:  This macro evaluates its argument more than once.
 *----------------------------------------------------------------------------*/
 #define softfloat_isSigNaNF16UI(uiA)                                           \
-  ((((uiA)&0x7E00) == 0x7C00) && ((uiA)&0x01FF))
+  ((((uiA) & 0x7E00) == 0x7C00) && ((uiA) & 0x01FF))
 
 /*----------------------------------------------------------------------------
 | Assuming `uiA' has the bit pattern of a 16-bit floating-point NaN, converts
@@ -120,7 +120,7 @@ struct commonNaN {
 | exception is raised.
 *----------------------------------------------------------------------------*/
 #define softfloat_f16UIToCommonNaN(uiA, zPtr)                                  \
-  if (!((uiA)&0x0200))                                                         \
+  if (!((uiA) & 0x0200))                                                       \
   (void)(zPtr), softfloat_raiseFlags(softfloat_flag_invalid)
 
 /*----------------------------------------------------------------------------
@@ -130,7 +130,7 @@ at the | location pointed to by `zPtr'.  If the NaN is a signaling NaN, the
 invalid | exception is raised.
 *----------------------------------------------------------------------------*/
 #define softfloat_bf16UIToCommonNaN(uiA, zPtr)                                 \
-  if (!((uiA)&0x040))                                                          \
+  if (!((uiA) & 0x040))                                                        \
   (void)(zPtr), softfloat_raiseFlags(softfloat_flag_invalid)
 
 /*----------------------------------------------------------------------------
@@ -165,7 +165,7 @@ uint_fast16_t softfloat_propagateNaNF16UI(uint_fast16_t uiA, uint_fast16_t uiB);
 | Note:  This macro evaluates its argument more than once.
 *----------------------------------------------------------------------------*/
 #define softfloat_isSigNaNF32UI(uiA)                                           \
-  ((((uiA)&0x7FC00000) == 0x7F800000) && ((uiA)&0x003FFFFF))
+  ((((uiA) & 0x7FC00000) == 0x7F800000) && ((uiA) & 0x003FFFFF))
 
 /*----------------------------------------------------------------------------
 | Assuming `uiA' has the bit pattern of a 32-bit floating-point NaN, converts
@@ -174,7 +174,7 @@ uint_fast16_t softfloat_propagateNaNF16UI(uint_fast16_t uiA, uint_fast16_t uiB);
 | exception is raised.
 *----------------------------------------------------------------------------*/
 #define softfloat_f32UIToCommonNaN(uiA, zPtr)                                  \
-  if (!((uiA)&0x00400000))                                                     \
+  if (!((uiA) & 0x00400000))                                                   \
   (void)(zPtr), softfloat_raiseFlags(softfloat_flag_invalid)
 
 /*----------------------------------------------------------------------------
@@ -202,8 +202,8 @@ uint_fast32_t softfloat_propagateNaNF32UI(uint_fast32_t uiA, uint_fast32_t uiB);
 | Note:  This macro evaluates its argument more than once.
 *----------------------------------------------------------------------------*/
 #define softfloat_isSigNaNF64UI(uiA)                                           \
-  ((((uiA)&UINT64_C(0x7FF8000000000000)) == UINT64_C(0x7FF0000000000000)) &&   \
-   ((uiA)&UINT64_C(0x0007FFFFFFFFFFFF)))
+  ((((uiA) & UINT64_C(0x7FF8000000000000)) == UINT64_C(0x7FF0000000000000)) && \
+   ((uiA) & UINT64_C(0x0007FFFFFFFFFFFF)))
 
 /*----------------------------------------------------------------------------
 | Assuming `uiA' has the bit pattern of a 64-bit floating-point NaN, converts
@@ -212,7 +212,7 @@ uint_fast32_t softfloat_propagateNaNF32UI(uint_fast32_t uiA, uint_fast32_t uiB);
 | exception is raised.
 *----------------------------------------------------------------------------*/
 #define softfloat_f64UIToCommonNaN(uiA, zPtr)                                  \
-  if (!((uiA)&UINT64_C(0x0008000000000000)))                                   \
+  if (!((uiA) & UINT64_C(0x0008000000000000)))                                 \
   (void)(zPtr), softfloat_raiseFlags(softfloat_flag_invalid)
 
 /*----------------------------------------------------------------------------
@@ -242,8 +242,9 @@ uint_fast64_t softfloat_propagateNaNF64UI(uint_fast64_t uiA, uint_fast64_t uiB);
 | Note:  This macro evaluates its arguments more than once.
 *----------------------------------------------------------------------------*/
 #define softfloat_isSigNaNExtF80UI(uiA64, uiA0)                                \
-  ((((uiA64)&0x7FFF) == 0x7FFF) && !((uiA0)&UINT64_C(0x4000000000000000)) &&   \
-   ((uiA0)&UINT64_C(0x3FFFFFFFFFFFFFFF)))
+  ((((uiA64) & 0x7FFF) == 0x7FFF) &&                                           \
+   !((uiA0) & UINT64_C(0x4000000000000000)) &&                                 \
+   ((uiA0) & UINT64_C(0x3FFFFFFFFFFFFFFF)))
 
 #ifdef SOFTFLOAT_FAST_INT64
 
@@ -260,7 +261,7 @@ uint_fast64_t softfloat_propagateNaNF64UI(uint_fast64_t uiA, uint_fast64_t uiB);
 | exception is raised.
 *----------------------------------------------------------------------------*/
 #define softfloat_extF80UIToCommonNaN(uiA64, uiA0, zPtr)                       \
-  if (!((uiA0)&UINT64_C(0x4000000000000000)))                                  \
+  if (!((uiA0) & UINT64_C(0x4000000000000000)))                                \
   softfloat_raiseFlags(softfloat_flag_invalid)
 
 /*----------------------------------------------------------------------------
@@ -310,8 +311,9 @@ struct uint128 softfloat_propagateNaNExtF80UI(uint_fast16_t uiA64,
 | Note:  This macro evaluates its arguments more than once.
 *----------------------------------------------------------------------------*/
 #define softfloat_isSigNaNF128UI(uiA64, uiA0)                                  \
-  ((((uiA64)&UINT64_C(0x7FFF800000000000)) == UINT64_C(0x7FFF000000000000)) && \
-   ((uiA0) || ((uiA64)&UINT64_C(0x00007FFFFFFFFFFF))))
+  ((((uiA64) & UINT64_C(0x7FFF800000000000)) ==                                \
+    UINT64_C(0x7FFF000000000000)) &&                                           \
+   ((uiA0) || ((uiA64) & UINT64_C(0x00007FFFFFFFFFFF))))
 
 /*----------------------------------------------------------------------------
 | Assuming the unsigned integer formed from concatenating `uiA64' and `uiA0'
@@ -321,7 +323,7 @@ struct uint128 softfloat_propagateNaNExtF80UI(uint_fast16_t uiA64,
 | is raised.
 *----------------------------------------------------------------------------*/
 #define softfloat_f128UIToCommonNaN(uiA64, uiA0, zPtr)                         \
-  if (!((uiA64)&UINT64_C(0x0000800000000000)))                                 \
+  if (!((uiA64) & UINT64_C(0x0000800000000000)))                               \
   (void)(zPtr), softfloat_raiseFlags(softfloat_flag_invalid)
 
 /*----------------------------------------------------------------------------
