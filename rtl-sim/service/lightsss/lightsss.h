@@ -17,15 +17,15 @@ struct LightsssConfig {
 };
 
 class LightsssService final : public SimService {
- public:
+public:
   explicit LightsssService(LightsssConfig config);
   ~LightsssService() override;
 
-  const char* name() const override { return "lightsss"; }
+  const char *name() const override { return "lightsss"; }
   bool on_posedge() override;
   void finish(bool error) override;
 
- private:
+private:
   void check_config();
   bool spawn();
   void wakeup();
@@ -36,11 +36,11 @@ class LightsssService final : public SimService {
   bool have_forked_;
   uint64_t interval_ms_;
   uint64_t last_fork_ms_;
-  LightsssShare* share_;
+  LightsssShare *share_;
   std::deque<int> slots_;
 };
 
-void register_lightsss_options(OptionSet& options);
+void register_lightsss_options(OptionSet &options);
 std::unique_ptr<SimService> create_lightsss();
 bool lightsss_enabled();
 

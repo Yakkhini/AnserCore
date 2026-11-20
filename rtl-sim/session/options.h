@@ -22,24 +22,24 @@ struct RegisteredOption {
   std::string help;
   char short_name;
   ValueKind kind;
-  void* context;
+  void *context;
 };
 
 class OptionSet {
- public:
-  void add(const char* name, bool* value, const char* help = nullptr,
+public:
+  void add(const char *name, bool *value, const char *help = nullptr,
            char short_name = 0);
-  void add(const char* name, uint32_t* value, const char* help = nullptr,
+  void add(const char *name, uint32_t *value, const char *help = nullptr,
            char short_name = 0);
-  void add(const char* name, std::string* value, const char* help = nullptr,
+  void add(const char *name, std::string *value, const char *help = nullptr,
            char short_name = 0);
 
-  ParseStatus parse(int argc, char** argv);
-  void print(const char* argv0) const;
+  ParseStatus parse(int argc, char **argv);
+  void print(const char *argv0) const;
 
- private:
+private:
   bool takes_value(ValueKind kind) const;
-  bool assign(const RegisteredOption& option, const char* value) const;
+  bool assign(const RegisteredOption &option, const char *value) const;
 
   std::vector<RegisteredOption> items_;
 };

@@ -16,7 +16,7 @@ struct IdealConfig {
 };
 
 IdealConfig config;
-SoftBackend* current = nullptr;
+SoftBackend *current = nullptr;
 
 bool same_inst(uint32_t dut, uint32_t mem) {
   if ((mem & 0x3u) != 0x3u) {
@@ -25,7 +25,7 @@ bool same_inst(uint32_t dut, uint32_t mem) {
   return dut == mem;
 }
 
-}  // namespace
+} // namespace
 
 SoftBackend::SoftBackend() {
   reset();
@@ -47,8 +47,8 @@ void SoftBackend::reset() {
   ideal_mtime_write(0);
 }
 
-bool SoftBackend::decode(ExecContext* ctx, uint32_t raw,
-                         IdealDecoded* decoded) {
+bool SoftBackend::decode(ExecContext *ctx, uint32_t raw,
+                         IdealDecoded *decoded) {
   uint32_t widened = 0;
   int len = ideal_widen(raw, &widened);
   if (len == 0 || !ideal_decode(widened, decoded) || decoded->exec == nullptr) {
@@ -99,7 +99,8 @@ StepResult SoftBackend::step(uint64_t pc, uint32_t inst,
                              unsigned char access_fault) {
   if (pc != hart_.pc) {
     std::fprintf(stderr,
-                 "softbackend pc mismatch: pc=0x%" PRIx64 " hart=0x%" PRIx64 "\n",
+                 "softbackend pc mismatch: pc=0x%" PRIx64 " hart=0x%" PRIx64
+                 "\n",
                  pc, hart_.pc);
     session_fail();
     return {};
@@ -162,7 +163,7 @@ StepResult SoftBackend::step(uint64_t pc, uint32_t inst,
   return step_result;
 }
 
-void register_ideal_options(OptionSet& options) {
+void register_ideal_options(OptionSet &options) {
   options.add("ideal", &config.enable, "enable the soft backend");
 }
 
@@ -176,8 +177,8 @@ std::unique_ptr<DpiModule> create_ideal() {
 extern "C" void ideal_backend_inst(uint64_t pc, unsigned int inst,
                                    unsigned char page_fault,
                                    unsigned char access_fault,
-                                   unsigned char* taken, uint64_t* target,
-                                   IsaState* state) {
+                                   unsigned char *taken, uint64_t *target,
+                                   IsaState *state) {
   if (current == nullptr) {
     std::fprintf(stderr, "ideal_backend_inst called without --ideal\n");
     std::abort();

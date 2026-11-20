@@ -34,18 +34,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =============================================================================*/
 
-#include <stdint.h>
-#include "platform.h"
 #include "internals.h"
+#include "platform.h"
+#include <stdint.h>
 
-struct exp16_sig64 softfloat_normSubnormalF64Sig( uint_fast64_t sig )
-{
-    int_fast8_t shiftDist;
-    struct exp16_sig64 z;
+struct exp16_sig64 softfloat_normSubnormalF64Sig(uint_fast64_t sig) {
+  int_fast8_t shiftDist;
+  struct exp16_sig64 z;
 
-    shiftDist = softfloat_countLeadingZeros64( sig ) - 11;
-    z.exp = 1 - shiftDist;
-    z.sig = sig<<shiftDist;
-    return z;
-
+  shiftDist = softfloat_countLeadingZeros64(sig) - 11;
+  z.exp = 1 - shiftDist;
+  z.sig = sig << shiftDist;
+  return z;
 }

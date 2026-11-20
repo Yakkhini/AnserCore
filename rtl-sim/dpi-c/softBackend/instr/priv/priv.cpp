@@ -1,6 +1,6 @@
 #include "dpi-c/softBackend/exec.h"
 
-ExecResult exec_wfi(ExecContext* ctx) {
+ExecResult exec_wfi(ExecContext *ctx) {
   // No interrupt is delivered, so WFI does not wait.
   if (ctx->hart->priv == 0 ||
       (ctx->hart->priv != 3 && (ctx->hart->csr.mstatus & kMstatusTw) != 0)) {
@@ -9,8 +9,8 @@ ExecResult exec_wfi(ExecContext* ctx) {
   return {};
 }
 
-ExecResult exec_sret(ExecContext* ctx) {
-  IdealHart* hart = ctx->hart;
+ExecResult exec_sret(ExecContext *ctx) {
+  IdealHart *hart = ctx->hart;
   if (hart->priv < 1 ||
       (hart->priv == 1 && (hart->csr.mstatus & kMstatusTsr) != 0)) {
     return exec_fault(kExcIllegal, ctx->inst);
@@ -32,7 +32,7 @@ ExecResult exec_sret(ExecContext* ctx) {
   return result;
 }
 
-ExecResult exec_sfence_vma(ExecContext* ctx) {
+ExecResult exec_sfence_vma(ExecContext *ctx) {
   if (ctx->hart->priv < 1 ||
       (ctx->hart->priv == 1 && (ctx->hart->csr.mstatus & kMstatusTvm) != 0)) {
     return exec_fault(kExcIllegal, ctx->inst);
@@ -40,9 +40,9 @@ ExecResult exec_sfence_vma(ExecContext* ctx) {
   return {};
 }
 
-ExecResult exec_fence_i(ExecContext*) { return {}; }
+ExecResult exec_fence_i(ExecContext *) { return {}; }
 
-ExecResult exec_ecall(ExecContext* ctx) {
+ExecResult exec_ecall(ExecContext *ctx) {
   uint64_t cause = kExcEcallM;
   if (ctx->hart->priv == 0) {
     cause = kExcEcallU;
@@ -54,12 +54,12 @@ ExecResult exec_ecall(ExecContext* ctx) {
   return exec_fault(cause, 0);
 }
 
-ExecResult exec_ebreak(ExecContext* ctx) {
+ExecResult exec_ebreak(ExecContext *ctx) {
   return exec_fault(kExcBreakpoint, ctx->hart->pc);
 }
 
-ExecResult exec_mret(ExecContext* ctx) {
-  IdealHart* hart = ctx->hart;
+ExecResult exec_mret(ExecContext *ctx) {
+  IdealHart *hart = ctx->hart;
   if (hart->priv != 3) {
     return exec_fault(kExcIllegal, ctx->inst);
   }
@@ -84,9 +84,9 @@ ExecResult exec_mret(ExecContext* ctx) {
   return result;
 }
 
-ExecResult exec_csrrw(ExecContext* ctx) { return ideal_csr(ctx, 0, false); }
-ExecResult exec_csrrs(ExecContext* ctx) { return ideal_csr(ctx, 1, false); }
-ExecResult exec_csrrc(ExecContext* ctx) { return ideal_csr(ctx, 2, false); }
-ExecResult exec_csrrwi(ExecContext* ctx) { return ideal_csr(ctx, 0, true); }
-ExecResult exec_csrrsi(ExecContext* ctx) { return ideal_csr(ctx, 1, true); }
-ExecResult exec_csrrci(ExecContext* ctx) { return ideal_csr(ctx, 2, true); }
+ExecResult exec_csrrw(ExecContext *ctx) { return ideal_csr(ctx, 0, false); }
+ExecResult exec_csrrs(ExecContext *ctx) { return ideal_csr(ctx, 1, false); }
+ExecResult exec_csrrc(ExecContext *ctx) { return ideal_csr(ctx, 2, false); }
+ExecResult exec_csrrwi(ExecContext *ctx) { return ideal_csr(ctx, 0, true); }
+ExecResult exec_csrrsi(ExecContext *ctx) { return ideal_csr(ctx, 1, true); }
+ExecResult exec_csrrci(ExecContext *ctx) { return ideal_csr(ctx, 2, true); }

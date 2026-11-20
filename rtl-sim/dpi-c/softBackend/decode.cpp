@@ -2,7 +2,7 @@
 
 #include "dpi-c/softBackend/exec.h"
 
-#define INSTR(name, pattern, fmt) ExecResult exec_##name(ExecContext* ctx);
+#define INSTR(name, pattern, fmt) ExecResult exec_##name(ExecContext *ctx);
 #include "instr/a/a.def"
 #include "instr/d/d.def"
 #include "instr/f/f.def"
@@ -14,8 +14,8 @@
 namespace {
 
 struct Entry {
-  const char* pattern;
-  const char* fmt;
+  const char *pattern;
+  const char *fmt;
   IdealExec exec;
   uint64_t key;
   uint64_t mask;
@@ -72,7 +72,7 @@ uint64_t imm_j(uint32_t inst) {
   return sext(raw, 21);
 }
 
-uint64_t format_imm(uint32_t inst, const char* fmt) {
+uint64_t format_imm(uint32_t inst, const char *fmt) {
   if (fmt[0] == 'I' && fmt[1] == '\0') {
     return imm_i(inst);
   }
@@ -95,12 +95,12 @@ uint64_t format_imm(uint32_t inst, const char* fmt) {
   return 0;
 }
 
-void pattern_decode(const char* pat, uint64_t* key, uint64_t* mask,
-                    uint8_t* shift) {
+void pattern_decode(const char *pat, uint64_t *key, uint64_t *mask,
+                    uint8_t *shift) {
   uint64_t k = 0;
   uint64_t m = 0;
   int trailing_wild = 0;
-  for (const char* p = pat; *p != '\0'; p++) {
+  for (const char *p = pat; *p != '\0'; p++) {
     if (*p == ' ') {
       continue;
     }
@@ -123,7 +123,7 @@ void pattern_decode(const char* pat, uint64_t* key, uint64_t* mask,
   *mask = m >> trailing_wild;
 }
 
-}  // namespace
+} // namespace
 
 void ideal_decode_init() {
   if (ready) {
@@ -136,11 +136,11 @@ void ideal_decode_init() {
   ready = true;
 }
 
-bool ideal_decode(uint32_t inst, IdealDecoded* out) {
+bool ideal_decode(uint32_t inst, IdealDecoded *out) {
   ideal_decode_init();
   out->exec = nullptr;
   for (int i = 0; i < kCount; i++) {
-    const Entry& entry = table[i];
+    const Entry &entry = table[i];
     if (((inst >> entry.shift) & entry.mask) != entry.key) {
       continue;
     }

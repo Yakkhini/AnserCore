@@ -21,11 +21,11 @@ struct MemoryConfig {
 };
 
 class MemoryService final : public SimService {
- public:
+public:
   explicit MemoryService(MemoryConfig config);
   ~MemoryService() override;
 
-  const char* name() const override { return "memory"; }
+  const char *name() const override { return "memory"; }
   bool on_posedge() override;
 
   // offset is the first byte of a 64-byte line.
@@ -36,16 +36,16 @@ class MemoryService final : public SimService {
   uint64_t read_word(uint64_t offset);
   // 0 means no response. Otherwise bit 32 is set and bits [31:0] are the id.
   uint64_t take_response(unsigned char is_write);
-  const uint8_t* image() const {
-    return reinterpret_cast<const uint8_t*>(words_.data());
+  const uint8_t *image() const {
+    return reinterpret_cast<const uint8_t *>(words_.data());
   }
   uint64_t image_bytes() const { return image_bytes_; }
 
- private:
+private:
   void check_config();
-  bool parse_ram_size(uint64_t* bytes);
+  bool parse_ram_size(uint64_t *bytes);
   bool load_image();
-  bool word_index(uint64_t offset, uint64_t* index) const;
+  bool word_index(uint64_t offset, uint64_t *index) const;
 
   MemoryConfig config_;
   std::vector<uint64_t> words_;
@@ -54,9 +54,9 @@ class MemoryService final : public SimService {
   bool failed_ = false;
 };
 
-MemoryService* current_memory();
+MemoryService *current_memory();
 
-void register_memory_options(OptionSet& options);
+void register_memory_options(OptionSet &options);
 std::unique_ptr<SimService> create_memory();
 
 #endif

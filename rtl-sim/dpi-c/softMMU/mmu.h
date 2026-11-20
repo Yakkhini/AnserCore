@@ -55,7 +55,7 @@ struct PmpEntry {
 // Built from one satp CSR. MODE must be Bare, Sv39, Sv48, or Sv57.
 // Anything else stops. This class does not report a page fault.
 class Satp {
- public:
+public:
   Satp();
   explicit Satp(uint64_t raw);
 
@@ -64,14 +64,14 @@ class Satp {
   uint16_t asid() const { return asid_; }
   int levels() const;
 
- private:
+private:
   SatpMode mode_;
   uint64_t ppn_;
   uint16_t asid_;
 };
 
 class Pmp {
- public:
+public:
   static constexpr unsigned kNumEntries = 16;
   static constexpr unsigned kgranule = 0;
   static_assert(kNumEntries == 0 || kNumEntries == 16 || kNumEntries == 64,
@@ -79,11 +79,11 @@ class Pmp {
 
   Pmp() = default;
   // cfg packs 8 entries per RV64 pmpcfg word. addr is pmpaddr[0..).
-  explicit Pmp(const uint64_t* cfg, const uint64_t* addr);
+  explicit Pmp(const uint64_t *cfg, const uint64_t *addr);
   // True when [addr, addr + len) may do this access.
   bool check(uint64_t addr, unsigned len, AccessType access, Priv priv) const;
 
- private:
+private:
   std::array<PmpEntry, kNumEntries> entries_{};
   unsigned granule = kgranule;
   unsigned numEntries = kNumEntries;
@@ -115,13 +115,13 @@ struct MmuConfig {
 
 // Created once with the DPI module. CSRs stay on the call that supplied them.
 class Mmu {
- public:
-  MmuResp translate(const MmuReq& req) const;
+public:
+  MmuResp translate(const MmuReq &req) const;
   bool check_pmp(uint8_t priv, uint8_t mpp, uint8_t mprv, uint8_t kind,
                  uint64_t addr, unsigned len, const uint64_t cfg[2],
                  const uint64_t pmpaddr[16]) const;
 
- private:
+private:
   struct Access {
     Priv priv;
     Priv mpp;
@@ -133,31 +133,31 @@ class Mmu {
     Pmp pmp;
   };
 
-  MmuResp translate(const Access& access, uint64_t vaddr) const;
-  bool pmp_ok(const Pmp& pmp, uint64_t addr, unsigned len, AccessType access,
+  MmuResp translate(const Access &access, uint64_t vaddr) const;
+  bool pmp_ok(const Pmp &pmp, uint64_t addr, unsigned len, AccessType access,
               Priv priv) const;
   Priv effective(Priv priv, Priv mpp, bool mprv, AccessType access) const;
   MmuResp physical(uint64_t addr) const;
   MmuResp fault(unsigned char page, unsigned char access) const;
-  MmuResp walk(const Access& access, uint64_t vaddr) const;
-  bool read_pte(const Pmp& pmp, uint64_t addr, uint64_t* pte) const;
+  MmuResp walk(const Access &access, uint64_t vaddr) const;
+  bool read_pte(const Pmp &pmp, uint64_t addr, uint64_t *pte) const;
 };
 
 class SoftMmu final : public DpiModule {
- public:
+public:
   SoftMmu();
   ~SoftMmu() override;
 
-  MmuResp translate(const MmuReq& req);
+  MmuResp translate(const MmuReq &req);
   bool check_pmp(uint8_t priv, uint8_t mpp, uint8_t mprv, uint8_t kind,
                  uint64_t addr, unsigned len, const uint64_t cfg[2],
                  const uint64_t pmpaddr[16]);
 
- private:
+private:
   Mmu mmu_;
 };
 
-void register_mmu_options(OptionSet& options);
+void register_mmu_options(OptionSet &options);
 std::unique_ptr<DpiModule> create_mmu();
 
 #endif

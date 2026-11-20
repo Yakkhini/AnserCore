@@ -43,19 +43,19 @@ extern "C" uint64_t memory_read(uint64_t offset);
 extern "C" void memory_write(uint64_t offset, uint64_t data,
                              unsigned char strobe);
 extern "C" void mmu_req(uint8_t priv, uint8_t mpp, uint8_t mprv, uint8_t sum,
-                        uint8_t mxr, uint8_t kind, uint64_t satp, uint64_t vaddr,
-                        uint64_t pmpcfg0, uint64_t pmpcfg2, uint64_t pmpaddr0,
-                        uint64_t pmpaddr1, uint64_t pmpaddr2, uint64_t pmpaddr3,
-                        uint64_t pmpaddr4, uint64_t pmpaddr5, uint64_t pmpaddr6,
-                        uint64_t pmpaddr7, uint64_t pmpaddr8, uint64_t pmpaddr9,
-                        uint64_t pmpaddr10, uint64_t pmpaddr11,
-                        uint64_t pmpaddr12, uint64_t pmpaddr13,
-                        uint64_t pmpaddr14, uint64_t pmpaddr15,
-                        uint8_t* page_fault, uint8_t* access_fault,
-                        uint64_t* paddr);
+                        uint8_t mxr, uint8_t kind, uint64_t satp,
+                        uint64_t vaddr, uint64_t pmpcfg0, uint64_t pmpcfg2,
+                        uint64_t pmpaddr0, uint64_t pmpaddr1, uint64_t pmpaddr2,
+                        uint64_t pmpaddr3, uint64_t pmpaddr4, uint64_t pmpaddr5,
+                        uint64_t pmpaddr6, uint64_t pmpaddr7, uint64_t pmpaddr8,
+                        uint64_t pmpaddr9, uint64_t pmpaddr10,
+                        uint64_t pmpaddr11, uint64_t pmpaddr12,
+                        uint64_t pmpaddr13, uint64_t pmpaddr14,
+                        uint64_t pmpaddr15, uint8_t *page_fault,
+                        uint8_t *access_fault, uint64_t *paddr);
 
-bool translate(const IdealHart* hart, uint64_t addr, uint8_t kind, uint64_t* pa,
-               bool* page_fault, bool* access_fault) {
+bool translate(const IdealHart *hart, uint64_t addr, uint8_t kind, uint64_t *pa,
+               bool *page_fault, bool *access_fault) {
   *page_fault = false;
   *access_fault = false;
   *pa = 0;
@@ -68,14 +68,14 @@ bool translate(const IdealHart* hart, uint64_t addr, uint8_t kind, uint64_t* pa,
   uint8_t page = 0;
   uint8_t access = 0;
   uint64_t translated = 0;
-  const uint64_t* pmp = hart->csr.pmpaddr;
+  const uint64_t *pmp = hart->csr.pmpaddr;
   mmu_req(hart->priv, static_cast<uint8_t>((hart->csr.mstatus >> 11) & 3u),
           (hart->csr.mstatus & kMstatusMprv) != 0 ? 1 : 0,
           (hart->csr.mstatus & kMstatusSum) != 0 ? 1 : 0,
-          (hart->csr.mstatus & kMstatusMxr) != 0 ? 1 : 0, kind,
-          hart->csr.satp, addr, cfg0, cfg2, pmp[0], pmp[1], pmp[2], pmp[3],
-          pmp[4], pmp[5], pmp[6], pmp[7], pmp[8], pmp[9], pmp[10], pmp[11],
-          pmp[12], pmp[13], pmp[14], pmp[15], &page, &access, &translated);
+          (hart->csr.mstatus & kMstatusMxr) != 0 ? 1 : 0, kind, hart->csr.satp,
+          addr, cfg0, cfg2, pmp[0], pmp[1], pmp[2], pmp[3], pmp[4], pmp[5],
+          pmp[6], pmp[7], pmp[8], pmp[9], pmp[10], pmp[11], pmp[12], pmp[13],
+          pmp[14], pmp[15], &page, &access, &translated);
   if (page != 0) {
     *page_fault = true;
     return false;
@@ -88,14 +88,15 @@ bool translate(const IdealHart* hart, uint64_t addr, uint8_t kind, uint64_t* pa,
   return true;
 }
 
-bool uart_access(uint64_t addr, unsigned size, bool store, uint64_t* data,
-                 ExecResult* result) {
+bool uart_access(uint64_t addr, unsigned size, bool store, uint64_t *data,
+                 ExecResult *result) {
   if (addr < kUartBase || addr >= kUartBase + kUartBytes) {
     return false;
   }
   result->mmio = true;
   if (size != 1 || (addr & (static_cast<uint64_t>(size) - 1ull)) != 0) {
-    *result = exec_fault(store ? kExcStoreMisaligned : kExcLoadMisaligned, addr);
+    *result =
+        exec_fault(store ? kExcStoreMisaligned : kExcLoadMisaligned, addr);
     result->mmio = true;
     return true;
   }
@@ -132,7 +133,7 @@ bool uart_access(uint64_t addr, unsigned size, bool store, uint64_t* data,
 }
 
 // The 8-byte mtime at 0x200bff8. 4-byte accesses hit the low or high half.
-bool mtime_access(uint64_t addr, unsigned size, bool store, uint64_t* data) {
+bool mtime_access(uint64_t addr, unsigned size, bool store, uint64_t *data) {
   if (size == 0 || addr < kMtimeAddr || addr + size > kMtimeAddr + 8) {
     return false;
   }
@@ -148,8 +149,8 @@ bool mtime_access(uint64_t addr, unsigned size, bool store, uint64_t* data) {
   return true;
 }
 
-bool device_window(uint64_t addr, unsigned size, bool store, uint64_t* data,
-                   ExecResult* result) {
+bool device_window(uint64_t addr, unsigned size, bool store, uint64_t *data,
+                   ExecResult *result) {
   bool clint = addr >= kClintBase && addr < kClintBase + kClintBytes;
   bool plic = addr >= kPlicBase && addr < kPlicBase + kPlicBytes;
   if (!clint && !plic) {
@@ -159,7 +160,8 @@ bool device_window(uint64_t addr, unsigned size, bool store, uint64_t* data,
   uint64_t bytes = clint ? kClintBytes : kPlicBytes;
   result->mmio = true;
   if ((addr & (static_cast<uint64_t>(size) - 1ull)) != 0) {
-    *result = exec_fault(store ? kExcStoreMisaligned : kExcLoadMisaligned, addr);
+    *result =
+        exec_fault(store ? kExcStoreMisaligned : kExcLoadMisaligned, addr);
     result->mmio = true;
     return true;
   }
@@ -179,7 +181,7 @@ bool device_window(uint64_t addr, unsigned size, bool store, uint64_t* data,
   return true;
 }
 
-bool ram_access(uint64_t addr, unsigned size, bool store, uint64_t* data) {
+bool ram_access(uint64_t addr, unsigned size, bool store, uint64_t *data) {
   if (addr < kRamBase) {
     return false;
   }
@@ -198,8 +200,8 @@ bool ram_access(uint64_t addr, unsigned size, bool store, uint64_t* data) {
   return true;
 }
 
-ExecResult access(ExecContext* ctx, uint64_t addr, unsigned size, bool store,
-                  uint64_t* data) {
+ExecResult access(ExecContext *ctx, uint64_t addr, unsigned size, bool store,
+                  uint64_t *data) {
   if (size != 1 && size != 2 && size != 4 && size != 8) {
     return exec_fault(store ? kExcStoreAccess : kExcLoadAccess, addr);
   }
@@ -232,7 +234,7 @@ ExecResult access(ExecContext* ctx, uint64_t addr, unsigned size, bool store,
   return {};
 }
 
-bool read_half(const IdealHart* hart, uint64_t addr, uint16_t* data) {
+bool read_half(const IdealHart *hart, uint64_t addr, uint16_t *data) {
   uint64_t pa = 0;
   bool page = false;
   bool access_fault = false;
@@ -247,9 +249,9 @@ bool read_half(const IdealHart* hart, uint64_t addr, uint16_t* data) {
   return true;
 }
 
-}  // namespace
+} // namespace
 
-bool ideal_fetch_inst(const IdealHart* hart, uint64_t pc, uint32_t* inst) {
+bool ideal_fetch_inst(const IdealHart *hart, uint64_t pc, uint32_t *inst) {
   uint16_t lo = 0;
   if (!read_half(hart, pc, &lo)) {
     return false;
@@ -272,12 +274,12 @@ void ideal_mtime_tick() { mtime += 1; }
 
 void ideal_mtime_write(uint64_t value) { mtime = value; }
 
-ExecResult ideal_load_data(ExecContext* ctx, uint64_t addr, unsigned size,
-                           uint64_t* value) {
+ExecResult ideal_load_data(ExecContext *ctx, uint64_t addr, unsigned size,
+                           uint64_t *value) {
   return access(ctx, addr, size, false, value);
 }
 
-ExecResult ideal_store_data(ExecContext* ctx, uint64_t addr, unsigned size,
+ExecResult ideal_store_data(ExecContext *ctx, uint64_t addr, unsigned size,
                             uint64_t value) {
   return access(ctx, addr, size, true, &value);
 }

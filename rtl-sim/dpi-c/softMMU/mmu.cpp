@@ -12,8 +12,7 @@ namespace {
 
 constexpr uint64_t kRamBase = 0x80000000ull;
 
-template <int Lo, int Hi>
-uint64_t bits(uint64_t value) {
+template <int Lo, int Hi> uint64_t bits(uint64_t value) {
   static_assert(Lo >= 0 && Hi >= Lo && Hi < 64, "bit range");
   if (Hi == 63 && Lo == 0) {
     return value;
@@ -24,7 +23,7 @@ uint64_t bits(uint64_t value) {
 }
 
 MmuConfig config;
-SoftMmu* current = nullptr;
+SoftMmu *current = nullptr;
 
 constexpr uint64_t kPteV = 1ull << 0;
 constexpr uint64_t kPteR = 1ull << 1;
@@ -40,33 +39,33 @@ constexpr uint64_t kPpnMask = (1ull << 44) - 1;
 
 constexpr unsigned kVpnBits = 9;
 
-void require_priv(uint8_t raw, Priv* priv) {
+void require_priv(uint8_t raw, Priv *priv) {
   switch (raw) {
-    case static_cast<uint8_t>(Priv::kUser):
-    case static_cast<uint8_t>(Priv::kSuper):
-    case static_cast<uint8_t>(Priv::kMachine):
-      *priv = static_cast<Priv>(raw);
-      return;
-    default:
-      std::fprintf(stderr, "mmu priv %u is not 0, 1, or 3\n", raw);
-      std::abort();
+  case static_cast<uint8_t>(Priv::kUser):
+  case static_cast<uint8_t>(Priv::kSuper):
+  case static_cast<uint8_t>(Priv::kMachine):
+    *priv = static_cast<Priv>(raw);
+    return;
+  default:
+    std::fprintf(stderr, "mmu priv %u is not 0, 1, or 3\n", raw);
+    std::abort();
   }
 }
 
-void require_access(uint8_t raw, AccessType* access) {
+void require_access(uint8_t raw, AccessType *access) {
   switch (raw) {
-    case static_cast<uint8_t>(AccessType::kFetch):
-    case static_cast<uint8_t>(AccessType::kLoad):
-    case static_cast<uint8_t>(AccessType::kStore):
-      *access = static_cast<AccessType>(raw);
-      return;
-    default:
-      std::fprintf(stderr, "mmu access %u is not fetch, load, or store\n", raw);
-      std::abort();
+  case static_cast<uint8_t>(AccessType::kFetch):
+  case static_cast<uint8_t>(AccessType::kLoad):
+  case static_cast<uint8_t>(AccessType::kStore):
+    *access = static_cast<AccessType>(raw);
+    return;
+  default:
+    std::fprintf(stderr, "mmu access %u is not fetch, load, or store\n", raw);
+    std::abort();
   }
 }
 
-bool require_bit(uint8_t raw, const char* name) {
+bool require_bit(uint8_t raw, const char *name) {
   if (raw > 1) {
     std::fprintf(stderr, "mmu %s %u is not 0 or 1\n", name, raw);
     std::abort();
@@ -80,28 +79,28 @@ bool canonical(uint64_t vaddr, int bits) {
   return (vaddr >> bits) == (sign != 0 ? ones : 0);
 }
 
-}  // namespace
+} // namespace
 
 Satp::Satp() : mode_(SatpMode::kBare), ppn_(0), asid_(0) {}
 
 Satp::Satp(uint64_t raw) {
   switch (bits<60, 63>(raw)) {
-    case static_cast<unsigned>(SatpMode::kBare):
-      mode_ = SatpMode::kBare;
-      break;
-    case static_cast<unsigned>(SatpMode::kSv39):
-      mode_ = SatpMode::kSv39;
-      break;
-    case static_cast<unsigned>(SatpMode::kSv48):
-      mode_ = SatpMode::kSv48;
-      break;
-    case static_cast<unsigned>(SatpMode::kSv57):
-      mode_ = SatpMode::kSv57;
-      break;
-    default:
-      std::fprintf(stderr, "satp mode %u is not bare, sv39, sv48, or sv57\n",
-                   static_cast<unsigned>(bits<60, 63>(raw)));
-      std::abort();
+  case static_cast<unsigned>(SatpMode::kBare):
+    mode_ = SatpMode::kBare;
+    break;
+  case static_cast<unsigned>(SatpMode::kSv39):
+    mode_ = SatpMode::kSv39;
+    break;
+  case static_cast<unsigned>(SatpMode::kSv48):
+    mode_ = SatpMode::kSv48;
+    break;
+  case static_cast<unsigned>(SatpMode::kSv57):
+    mode_ = SatpMode::kSv57;
+    break;
+  default:
+    std::fprintf(stderr, "satp mode %u is not bare, sv39, sv48, or sv57\n",
+                 static_cast<unsigned>(bits<60, 63>(raw)));
+    std::abort();
   }
   ppn_ = bits<0, 43>(raw);
   asid_ = static_cast<uint16_t>(bits<44, 59>(raw));
@@ -109,19 +108,19 @@ Satp::Satp(uint64_t raw) {
 
 int Satp::levels() const {
   switch (mode_) {
-    case SatpMode::kSv39:
-      return 3;
-    case SatpMode::kSv48:
-      return 4;
-    case SatpMode::kSv57:
-      return 5;
-    case SatpMode::kBare:
-      return 0;
+  case SatpMode::kSv39:
+    return 3;
+  case SatpMode::kSv48:
+    return 4;
+  case SatpMode::kSv57:
+    return 5;
+  case SatpMode::kBare:
+    return 0;
   }
   return 0;
 }
 
-Pmp::Pmp(const uint64_t* cfg, const uint64_t* addr) {
+Pmp::Pmp(const uint64_t *cfg, const uint64_t *addr) {
   constexpr uint64_t kAddrMask = (1ull << 54) - 1;
   for (unsigned i = 0; i < kNumEntries; i++) {
     uint64_t word = cfg[i / 8];
@@ -171,35 +170,35 @@ bool Pmp::check(uint64_t addr, unsigned len, AccessType access,
   uint64_t napot_fill = granule == 0 ? 0 : (uint64_t{1} << granule) - 1;
 
   for (unsigned i = 0; i < numEntries; i++) {
-    const PmpEntry& item = entries_[i];
+    const PmpEntry &item = entries_[i];
     PmpMatch match = item.cfg.a;
     uint64_t low = 0;
     uint64_t high = 0;
     bool covered = false;
 
     switch (match) {
-      case PmpMatch::kOff:
-        break;
-      case PmpMatch::kTor:
-        low = (prev_pmpaddr & tor_mask) << 2;
-        high = (item.addr & tor_mask) << 2;
-        covered = low < high;
-        break;
-      case PmpMatch::kNa4:
-      case PmpMatch::kNapot: {
-        constexpr unsigned kEncodedBits = 55;
-        uint64_t encoded = (item.addr << 1) | napot_fill;
-        if (match == PmpMatch::kNapot) {
-          encoded |= 1u;
-        }
-        unsigned ones = static_cast<unsigned>(
-            __builtin_ctzll(~encoded | (uint64_t{1} << kEncodedBits)));
-        uint64_t aligned = encoded & ~((uint64_t{1} << ones) - 1);
-        low = (aligned >> 1) << 2;
-        high = low + (uint64_t{1} << (ones + 2));
-        covered = true;
-        break;
+    case PmpMatch::kOff:
+      break;
+    case PmpMatch::kTor:
+      low = (prev_pmpaddr & tor_mask) << 2;
+      high = (item.addr & tor_mask) << 2;
+      covered = low < high;
+      break;
+    case PmpMatch::kNa4:
+    case PmpMatch::kNapot: {
+      constexpr unsigned kEncodedBits = 55;
+      uint64_t encoded = (item.addr << 1) | napot_fill;
+      if (match == PmpMatch::kNapot) {
+        encoded |= 1u;
       }
+      unsigned ones = static_cast<unsigned>(
+          __builtin_ctzll(~encoded | (uint64_t{1} << kEncodedBits)));
+      uint64_t aligned = encoded & ~((uint64_t{1} << ones) - 1);
+      low = (aligned >> 1) << 2;
+      high = low + (uint64_t{1} << (ones + 2));
+      covered = true;
+      break;
+    }
     }
 
     prev_pmpaddr = item.addr;
@@ -213,19 +212,19 @@ bool Pmp::check(uint64_t addr, unsigned len, AccessType access,
       return true;
     }
     switch (access) {
-      case AccessType::kFetch:
-        return item.cfg.x;
-      case AccessType::kLoad:
-        return item.cfg.r;
-      default:
-        return item.cfg.w;
+    case AccessType::kFetch:
+      return item.cfg.x;
+    case AccessType::kLoad:
+      return item.cfg.r;
+    default:
+      return item.cfg.w;
     }
   }
 
   return priv == Priv::kMachine;
 }
 
-MmuResp Mmu::translate(const MmuReq& req) const {
+MmuResp Mmu::translate(const MmuReq &req) const {
   Priv priv;
   Priv mpp;
   require_priv(req.priv, &priv);
@@ -266,12 +265,12 @@ Priv Mmu::effective(Priv priv, Priv mpp, bool mprv, AccessType access) const {
   return priv;
 }
 
-bool Mmu::pmp_ok(const Pmp& pmp, uint64_t addr, unsigned len, AccessType access,
+bool Mmu::pmp_ok(const Pmp &pmp, uint64_t addr, unsigned len, AccessType access,
                  Priv priv) const {
   return pmp.check(addr, len, access, priv);
 }
 
-bool Mmu::read_pte(const Pmp& pmp, uint64_t addr, uint64_t* pte) const {
+bool Mmu::read_pte(const Pmp &pmp, uint64_t addr, uint64_t *pte) const {
   if (!pmp_ok(pmp, addr, 8, AccessType::kLoad, Priv::kSuper)) {
     return false;
   }
@@ -295,7 +294,7 @@ MmuResp Mmu::fault(uint8_t page, uint8_t access) const {
   return resp;
 }
 
-MmuResp Mmu::walk(const Access& access, uint64_t vaddr) const {
+MmuResp Mmu::walk(const Access &access, uint64_t vaddr) const {
   Priv priv = effective(access.priv, access.mpp, access.mprv, access.kind);
   uint64_t table = access.satp.ppn() << 12;
   int levels = access.satp.levels();
@@ -331,7 +330,8 @@ MmuResp Mmu::walk(const Access& access, uint64_t vaddr) const {
       if (!user_page) {
         return fault(1, 0);
       }
-    } else if (user_page && (access.kind == AccessType::kFetch || !access.sum)) {
+    } else if (user_page &&
+               (access.kind == AccessType::kFetch || !access.sum)) {
       return fault(1, 0);
     }
     // 权限检查
@@ -339,8 +339,7 @@ MmuResp Mmu::walk(const Access& access, uint64_t vaddr) const {
     if (access.kind == AccessType::kFetch) {
       permitted = (pte & kPteX) != 0;
     } else if (access.kind == AccessType::kLoad) {
-      permitted = (pte & kPteR) != 0 ||
-                  (access.mxr && (pte & kPteX) != 0);
+      permitted = (pte & kPteR) != 0 || (access.mxr && (pte & kPteX) != 0);
     } else {
       permitted = (pte & kPteW) != 0;
     }
@@ -365,7 +364,7 @@ MmuResp Mmu::walk(const Access& access, uint64_t vaddr) const {
   return fault(1, 0);
 }
 
-MmuResp Mmu::translate(const Access& access, uint64_t vaddr) const {
+MmuResp Mmu::translate(const Access &access, uint64_t vaddr) const {
   Priv priv = effective(access.priv, access.mpp, access.mprv, access.kind);
   if (priv == Priv::kMachine || access.satp.mode() == SatpMode::kBare) {
     return physical(vaddr);
@@ -386,7 +385,7 @@ SoftMmu::~SoftMmu() {
   }
 }
 
-MmuResp SoftMmu::translate(const MmuReq& req) { return mmu_.translate(req); }
+MmuResp SoftMmu::translate(const MmuReq &req) { return mmu_.translate(req); }
 
 bool SoftMmu::check_pmp(uint8_t priv, uint8_t mpp, uint8_t mprv, uint8_t kind,
                         uint64_t addr, unsigned len, const uint64_t cfg[2],
@@ -394,7 +393,7 @@ bool SoftMmu::check_pmp(uint8_t priv, uint8_t mpp, uint8_t mprv, uint8_t kind,
   return mmu_.check_pmp(priv, mpp, mprv, kind, addr, len, cfg, pmpaddr);
 }
 
-void register_mmu_options(OptionSet& options) {
+void register_mmu_options(OptionSet &options) {
   options.add("mmu", &config.enable, "enable the soft MMU");
 }
 
@@ -414,8 +413,8 @@ extern "C" void mmu_req(uint8_t priv, uint8_t mpp, uint8_t mprv, uint8_t sum,
                         uint64_t pmpaddr9, uint64_t pmpaddr10,
                         uint64_t pmpaddr11, uint64_t pmpaddr12,
                         uint64_t pmpaddr13, uint64_t pmpaddr14,
-                        uint64_t pmpaddr15, uint8_t* page_fault,
-                        uint8_t* access_fault, uint64_t* paddr) {
+                        uint64_t pmpaddr15, uint8_t *page_fault,
+                        uint8_t *access_fault, uint64_t *paddr) {
   if (current == nullptr) {
     std::fprintf(stderr, "mmu_req called without --mmu\n");
     std::abort();
@@ -453,17 +452,14 @@ extern "C" void mmu_req(uint8_t priv, uint8_t mpp, uint8_t mprv, uint8_t sum,
   *paddr = resp.paddr;
 }
 
-extern "C" unsigned char pmp_req(uint8_t priv, uint8_t mpp, uint8_t mprv,
-                                 uint8_t len, uint8_t kind, uint64_t addr,
-                                 uint64_t pmpcfg0, uint64_t pmpcfg2,
-                                 uint64_t pmpaddr0, uint64_t pmpaddr1,
-                                 uint64_t pmpaddr2, uint64_t pmpaddr3,
-                                 uint64_t pmpaddr4, uint64_t pmpaddr5,
-                                 uint64_t pmpaddr6, uint64_t pmpaddr7,
-                                 uint64_t pmpaddr8, uint64_t pmpaddr9,
-                                 uint64_t pmpaddr10, uint64_t pmpaddr11,
-                                 uint64_t pmpaddr12, uint64_t pmpaddr13,
-                                 uint64_t pmpaddr14, uint64_t pmpaddr15) {
+extern "C" unsigned char
+pmp_req(uint8_t priv, uint8_t mpp, uint8_t mprv, uint8_t len, uint8_t kind,
+        uint64_t addr, uint64_t pmpcfg0, uint64_t pmpcfg2, uint64_t pmpaddr0,
+        uint64_t pmpaddr1, uint64_t pmpaddr2, uint64_t pmpaddr3,
+        uint64_t pmpaddr4, uint64_t pmpaddr5, uint64_t pmpaddr6,
+        uint64_t pmpaddr7, uint64_t pmpaddr8, uint64_t pmpaddr9,
+        uint64_t pmpaddr10, uint64_t pmpaddr11, uint64_t pmpaddr12,
+        uint64_t pmpaddr13, uint64_t pmpaddr14, uint64_t pmpaddr15) {
   if (current == nullptr) {
     std::fprintf(stderr, "pmp_req called without --mmu\n");
     std::abort();
@@ -474,7 +470,6 @@ extern "C" unsigned char pmp_req(uint8_t priv, uint8_t mpp, uint8_t mprv,
       pmpaddr6,  pmpaddr7,  pmpaddr8,  pmpaddr9,  pmpaddr10, pmpaddr11,
       pmpaddr12, pmpaddr13, pmpaddr14, pmpaddr15,
   };
-  return current->check_pmp(priv, mpp, mprv, kind, addr, len, cfg, pmpaddr)
-             ? 1
-             : 0;
+  return current->check_pmp(priv, mpp, mprv, kind, addr, len, cfg, pmpaddr) ? 1
+                                                                            : 0;
 }

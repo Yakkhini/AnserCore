@@ -15,11 +15,11 @@
 namespace {
 
 DifftestConfig config;
-Difftest* current = nullptr;
+Difftest *current = nullptr;
 
 struct Scalar {
-  const char* name;
-  uint64_t IsaState::* field;
+  const char *name;
+  uint64_t IsaState::*field;
 };
 
 const Scalar kScalars[] = {
@@ -45,14 +45,14 @@ const Scalar kScalars[] = {
     {"fcsr", &IsaState::fcsr},
 };
 
-void note(std::vector<std::string>* bad, const char* name, uint64_t dut,
+void note(std::vector<std::string> *bad, const char *name, uint64_t dut,
           uint64_t ref) {
   if (dut != ref) {
     bad->push_back(name);
   }
 }
 
-void note_at(std::vector<std::string>* bad, const char* format, int index,
+void note_at(std::vector<std::string> *bad, const char *format, int index,
              uint64_t dut, uint64_t ref) {
   if (dut == ref) {
     return;
@@ -62,7 +62,7 @@ void note_at(std::vector<std::string>* bad, const char* format, int index,
   bad->push_back(name);
 }
 
-void print_state(const char* title, const IsaState& state) {
+void print_state(const char *title, const IsaState &state) {
   std::fprintf(stderr, "%s\n", title);
   for (int i = 0; i < 32; ++i) {
     std::fprintf(stderr, "  x%-2d %016" PRIx64 "\n", i, state.gpr[i]);
@@ -70,13 +70,13 @@ void print_state(const char* title, const IsaState& state) {
   for (int i = 0; i < 32; ++i) {
     std::fprintf(stderr, "  f%-2d %016" PRIx64 "\n", i, state.fpr[i]);
   }
-  for (const Scalar& scalar : kScalars) {
+  for (const Scalar &scalar : kScalars) {
     std::fprintf(stderr, "  %-14s %016" PRIx64 "\n", scalar.name,
                  state.*(scalar.field));
   }
 }
 
-}  // namespace
+} // namespace
 
 Difftest::Difftest(DifftestConfig parsed)
     : config_(std::move(parsed)),
@@ -90,14 +90,14 @@ Difftest::~Difftest() {
   }
 }
 
-void Difftest::copy_to_ref(const IsaState& dut) {
+void Difftest::copy_to_ref(const IsaState &dut) {
   IsaState image = dut;
   ref_->regcpy(&image, DIFFTEST_TO_REF);
 }
 
 void Difftest::exec(uint64_t n) { ref_->exec(n); }
 
-void Difftest::isa_compare(const IsaState& dut) {
+void Difftest::isa_compare(const IsaState &dut) {
   IsaState ref{};
   ref_->regcpy(&ref, DIFFTEST_TO_DUT);
 
@@ -106,7 +106,7 @@ void Difftest::isa_compare(const IsaState& dut) {
     note_at(&bad, "x%d", i, dut.gpr[i], ref.gpr[i]);
     note_at(&bad, "f%d", i, dut.fpr[i], ref.fpr[i]);
   }
-  for (const Scalar& scalar : kScalars) {
+  for (const Scalar &scalar : kScalars) {
     note(&bad, scalar.name, dut.*(scalar.field), ref.*(scalar.field));
   }
   if (bad.empty()) {
@@ -116,14 +116,14 @@ void Difftest::isa_compare(const IsaState& dut) {
   print_state("ref", ref);
   print_state("dut", dut);
   std::fprintf(stderr, "difftest mismatch:");
-  for (const std::string& name : bad) {
+  for (const std::string &name : bad) {
     std::fprintf(stderr, " %s", name.c_str());
   }
   std::fprintf(stderr, "\n");
   session_fail();
 }
 
-void register_difftest_options(OptionSet& options) {
+void register_difftest_options(OptionSet &options) {
   options.add("difftest", &config.enable,
               "enable difftest and load the reference");
   options.add("difftest-ref", &config.ref_path,
@@ -150,7 +150,7 @@ struct CommitSlot {
   bool skip = false;
 };
 
-bool take_word(const uint64_t* words, int nwords, int* index, uint64_t* out) {
+bool take_word(const uint64_t *words, int nwords, int *index, uint64_t *out) {
   if (*index >= nwords) {
     return false;
   }
@@ -159,7 +159,7 @@ bool take_word(const uint64_t* words, int nwords, int* index, uint64_t* out) {
   return true;
 }
 
-void handle_arch_commit(const uint64_t* words, int nwords) {
+void handle_arch_commit(const uint64_t *words, int nwords) {
   if (nwords != kArchWords) {
     std::fprintf(stderr, "DiffArchCommit has %d words, expected %d\n", nwords,
                  kArchWords);
@@ -193,14 +193,14 @@ void handle_arch_commit(const uint64_t* words, int nwords) {
       return;
     }
   }
-  uint64_t* csr[] = {
+  uint64_t *csr[] = {
       &dut.priv,     &dut.mstatus, &dut.sstatus, &dut.mepc,  &dut.sepc,
       &dut.mtval,    &dut.stval,   &dut.mtvec,   &dut.stvec, &dut.mcause,
       &dut.scause,   &dut.satp,    &dut.mip,     &dut.mie,   &dut.mscratch,
       &dut.sscratch, &dut.mideleg, &dut.medeleg, &dut.fcsr,
   };
   static_assert(sizeof(csr) / sizeof(csr[0]) == kCsrWords, "csr count");
-  for (uint64_t* field : csr) {
+  for (uint64_t *field : csr) {
     if (!take_word(words, nwords, &index, field)) {
       session_fail();
       return;
@@ -213,7 +213,7 @@ void handle_arch_commit(const uint64_t* words, int nwords) {
 
   bool skip = false;
   uint64_t steps = 0;
-  for (const CommitSlot& slot : commits) {
+  for (const CommitSlot &slot : commits) {
     if (!slot.valid) {
       continue;
     }
@@ -235,22 +235,22 @@ void handle_arch_commit(const uint64_t* words, int nwords) {
 }
 
 struct ProbeHandler {
-  const char* name;
-  void (*handle)(const uint64_t* words, int nwords);
+  const char *name;
+  void (*handle)(const uint64_t *words, int nwords);
 };
 
 const ProbeHandler kHandlers[] = {
     {"DiffArchCommit", handle_arch_commit},
 };
 
-}  // namespace
+} // namespace
 
-extern "C" void difftest_probe_push(const char* name, const uint64_t* words,
+extern "C" void difftest_probe_push(const char *name, const uint64_t *words,
                                     int nwords) {
   assert(current != nullptr);
   assert(name != nullptr);
   assert(words != nullptr);
-  for (const ProbeHandler& handler : kHandlers) {
+  for (const ProbeHandler &handler : kHandlers) {
     if (std::strcmp(name, handler.name) == 0) {
       handler.handle(words, nwords);
       return;

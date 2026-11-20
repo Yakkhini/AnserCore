@@ -34,55 +34,50 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =============================================================================*/
 
+#include "internals.h"
+#include "platform.h"
+#include "softfloat.h"
+#include "specialize.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include "platform.h"
-#include "internals.h"
-#include "specialize.h"
-#include "softfloat.h"
 
-int_fast64_t
- softfloat_roundToI64(
-     bool sign,
-     uint_fast64_t sig,
-     uint_fast64_t sigExtra,
-     uint_fast8_t roundingMode,
-     bool exact
- )
-{
-    bool roundNearEven, doIncrement;
-    union { uint64_t ui; int64_t i; } uZ;
-    int_fast64_t z;
+int_fast64_t softfloat_roundToI64(bool sign, uint_fast64_t sig,
+                                  uint_fast64_t sigExtra,
+                                  uint_fast8_t roundingMode, bool exact) {
+  bool roundNearEven, doIncrement;
+  union {
+    uint64_t ui;
+    int64_t i;
+  } uZ;
+  int_fast64_t z;
 
-    /*------------------------------------------------------------------------
-    *------------------------------------------------------------------------*/
-    roundNearEven = (roundingMode == softfloat_round_near_even);
-    doIncrement = (UINT64_C( 0x8000000000000000 ) <= sigExtra);
-    if ( ! roundNearEven && (roundingMode != softfloat_round_near_maxMag) ) {
-        doIncrement =
-            (roundingMode
-                 == (sign ? softfloat_round_min : softfloat_round_max))
-                && sigExtra;
-    }
-    if ( doIncrement ) {
-        ++sig;
-        if ( ! sig ) goto invalid;
-        sig &=
-            ~(uint_fast64_t)
-                 (! (sigExtra & UINT64_C( 0x7FFFFFFFFFFFFFFF ))
-                      & roundNearEven);
-    }
-    uZ.ui = sign ? -sig : sig;
-    z = uZ.i;
-    if ( z && ((z < 0) ^ sign) ) goto invalid;
-    if ( exact && sigExtra ) {
-        softfloat_exceptionFlags |= softfloat_flag_inexact;
-    }
-    return z;
-    /*------------------------------------------------------------------------
-    *------------------------------------------------------------------------*/
- invalid:
-    softfloat_raiseFlags( softfloat_flag_invalid );
-    return sign ? i64_fromNegOverflow : i64_fromPosOverflow;
-
+  /*------------------------------------------------------------------------
+   *------------------------------------------------------------------------*/
+  roundNearEven = (roundingMode == softfloat_round_near_even);
+  doIncrement = (UINT64_C(0x8000000000000000) <= sigExtra);
+  if (!roundNearEven && (roundingMode != softfloat_round_near_maxMag)) {
+    doIncrement =
+        (roundingMode == (sign ? softfloat_round_min : softfloat_round_max)) &&
+        sigExtra;
+  }
+  if (doIncrement) {
+    ++sig;
+    if (!sig)
+      goto invalid;
+    sig &= ~(uint_fast64_t)(!(sigExtra & UINT64_C(0x7FFFFFFFFFFFFFFF)) &
+                            roundNearEven);
+  }
+  uZ.ui = sign ? -sig : sig;
+  z = uZ.i;
+  if (z && ((z < 0) ^ sign))
+    goto invalid;
+  if (exact && sigExtra) {
+    softfloat_exceptionFlags |= softfloat_flag_inexact;
+  }
+  return z;
+  /*------------------------------------------------------------------------
+   *------------------------------------------------------------------------*/
+invalid:
+  softfloat_raiseFlags(softfloat_flag_invalid);
+  return sign ? i64_fromNegOverflow : i64_fromPosOverflow;
 }

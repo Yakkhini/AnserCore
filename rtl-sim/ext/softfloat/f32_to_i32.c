@@ -34,50 +34,50 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =============================================================================*/
 
+#include "internals.h"
+#include "platform.h"
+#include "softfloat.h"
+#include "specialize.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include "platform.h"
-#include "internals.h"
-#include "specialize.h"
-#include "softfloat.h"
 
-int_fast32_t f32_to_i32( float32_t a, uint_fast8_t roundingMode, bool exact )
-{
-    union ui32_f32 uA;
-    uint_fast32_t uiA;
-    bool sign;
-    int_fast16_t exp;
-    uint_fast32_t sig;
-    uint_fast64_t sig64;
-    int_fast16_t shiftDist;
+int_fast32_t f32_to_i32(float32_t a, uint_fast8_t roundingMode, bool exact) {
+  union ui32_f32 uA;
+  uint_fast32_t uiA;
+  bool sign;
+  int_fast16_t exp;
+  uint_fast32_t sig;
+  uint_fast64_t sig64;
+  int_fast16_t shiftDist;
 
-    /*------------------------------------------------------------------------
-    *------------------------------------------------------------------------*/
-    uA.f = a;
-    uiA = uA.ui;
-    sign = signF32UI( uiA );
-    exp  = expF32UI( uiA );
-    sig  = fracF32UI( uiA );
-    /*------------------------------------------------------------------------
-    *------------------------------------------------------------------------*/
+  /*------------------------------------------------------------------------
+   *------------------------------------------------------------------------*/
+  uA.f = a;
+  uiA = uA.ui;
+  sign = signF32UI(uiA);
+  exp = expF32UI(uiA);
+  sig = fracF32UI(uiA);
+  /*------------------------------------------------------------------------
+   *------------------------------------------------------------------------*/
 #if (i32_fromNaN != i32_fromPosOverflow) || (i32_fromNaN != i32_fromNegOverflow)
-    if ( (exp == 0xFF) && sig ) {
+  if ((exp == 0xFF) && sig) {
 #if (i32_fromNaN == i32_fromPosOverflow)
-        sign = 0;
+    sign = 0;
 #elif (i32_fromNaN == i32_fromNegOverflow)
-        sign = 1;
+    sign = 1;
 #else
-        softfloat_raiseFlags( softfloat_flag_invalid );
-        return i32_fromNaN;
+    softfloat_raiseFlags(softfloat_flag_invalid);
+    return i32_fromNaN;
 #endif
-    }
+  }
 #endif
-    /*------------------------------------------------------------------------
-    *------------------------------------------------------------------------*/
-    if ( exp ) sig |= 0x00800000;
-    sig64 = (uint_fast64_t) sig<<32;
-    shiftDist = 0xAA - exp;
-    if ( 0 < shiftDist ) sig64 = softfloat_shiftRightJam64( sig64, shiftDist );
-    return softfloat_roundToI32( sign, sig64, roundingMode, exact );
-
+  /*------------------------------------------------------------------------
+   *------------------------------------------------------------------------*/
+  if (exp)
+    sig |= 0x00800000;
+  sig64 = (uint_fast64_t)sig << 32;
+  shiftDist = 0xAA - exp;
+  if (0 < shiftDist)
+    sig64 = softfloat_shiftRightJam64(sig64, shiftDist);
+  return softfloat_roundToI32(sign, sig64, roundingMode, exact);
 }

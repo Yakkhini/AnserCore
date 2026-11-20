@@ -15,8 +15,8 @@ struct Gpr {
 };
 
 struct Fpr {
-  uint64_t& operator[](unsigned i) { return v[i]; }
-  const uint64_t& operator[](unsigned i) const { return v[i]; }
+  uint64_t &operator[](unsigned i) { return v[i]; }
+  const uint64_t &operator[](unsigned i) const { return v[i]; }
 
   uint64_t v[32];
   uint64_t fcsr;
@@ -145,13 +145,13 @@ inline ExecResult exec_branch(bool taken, uint64_t target) {
 
 // Inputs for one instruction. inst is the widened encoding. len is 2 or 4.
 struct ExecContext {
-  IdealHart* hart;
+  IdealHart *hart;
   uint32_t inst;
   unsigned len;
   IdealOperands operands;
 };
 
-typedef ExecResult (*IdealExec)(ExecContext* ctx);
+typedef ExecResult (*IdealExec)(ExecContext *ctx);
 
 struct IdealDecoded {
   IdealExec exec;
@@ -159,24 +159,24 @@ struct IdealDecoded {
 };
 
 void ideal_decode_init();
-bool ideal_decode(uint32_t inst, IdealDecoded* out);
+bool ideal_decode(uint32_t inst, IdealDecoded *out);
 // Low two bits not 11: expand a legal RVC parcel into `widened` and return 2.
 // A 32-bit encoding is copied through and returns 4. Reserved parcels return 0.
-int ideal_widen(uint32_t inst, uint32_t* widened);
+int ideal_widen(uint32_t inst, uint32_t *widened);
 
-inline uint64_t ideal_gpr_read(const IdealHart* hart, uint8_t rs) {
+inline uint64_t ideal_gpr_read(const IdealHart *hart, uint8_t rs) {
   return hart->gpr.read(rs);
 }
-inline void ideal_gpr_write(IdealHart* hart, uint8_t rd, uint64_t value) {
+inline void ideal_gpr_write(IdealHart *hart, uint8_t rd, uint64_t value) {
   hart->gpr.write(rd, value);
 }
 
 // Writes epc, cause, tval, and privilege. Returns the handler pc.
-uint64_t ideal_raise(IdealHart* hart, uint64_t cause, uint64_t tval);
-void ideal_fix_sd(IdealHart* hart);
+uint64_t ideal_raise(IdealHart *hart, uint64_t cause, uint64_t tval);
+void ideal_fix_sd(IdealHart *hart);
 
 // CSR ops. op 0 writes, 1 sets, 2 clears. imm selects the 5-bit zimm.
-ExecResult ideal_csr(ExecContext* ctx, int op, bool imm);
+ExecResult ideal_csr(ExecContext *ctx, int op, bool imm);
 
 // Retired instructions advance this once. CSR time and CLINT mtime read it.
 uint64_t ideal_mtime();
@@ -184,14 +184,14 @@ void ideal_mtime_tick();
 void ideal_mtime_write(uint64_t value);
 
 // Raw instruction at pc. A compressed encoding is returned in the low 16 bits.
-bool ideal_fetch_inst(const IdealHart* hart, uint64_t pc, uint32_t* inst);
+bool ideal_fetch_inst(const IdealHart *hart, uint64_t pc, uint32_t *inst);
 
 // Data access. mmu_req translates the address. The physical address then
 // hits UART, the CLINT/PLIC windows, or RAM through memory_read and
 // memory_write. A fault does not write the destination or memory.
-ExecResult ideal_load_data(ExecContext* ctx, uint64_t addr, unsigned size,
-                           uint64_t* value);
-ExecResult ideal_store_data(ExecContext* ctx, uint64_t addr, unsigned size,
+ExecResult ideal_load_data(ExecContext *ctx, uint64_t addr, unsigned size,
+                           uint64_t *value);
+ExecResult ideal_store_data(ExecContext *ctx, uint64_t addr, unsigned size,
                             uint64_t value);
 
 #endif

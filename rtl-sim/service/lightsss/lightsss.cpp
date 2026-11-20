@@ -48,20 +48,16 @@ void wait_pid(int pid) {
   }
 }
 
-}  // namespace
+} // namespace
 
 LightsssService::LightsssService(LightsssConfig parsed)
-    : config_(std::move(parsed)),
-      is_child_(false),
-      have_forked_(false),
-      interval_ms_(0),
-      last_fork_ms_(0),
-      share_(nullptr) {
+    : config_(std::move(parsed)), is_child_(false), have_forked_(false),
+      interval_ms_(0), last_fork_ms_(0), share_(nullptr) {
   check_config();
   interval_ms_ = static_cast<uint64_t>(config_.interval) * 1000ull;
   std::setvbuf(stdout, nullptr, _IOLBF, 0);
   flush_stdio();
-  void* memory = mmap(nullptr, sizeof(LightsssShare), PROT_READ | PROT_WRITE,
+  void *memory = mmap(nullptr, sizeof(LightsssShare), PROT_READ | PROT_WRITE,
                       MAP_SHARED | MAP_ANONYMOUS, -1, 0);
   if (memory == MAP_FAILED) {
     throw std::runtime_error("LightSSS mmap failed");
@@ -182,7 +178,7 @@ void LightsssService::finish(bool error) {
   clear_children();
 }
 
-void register_lightsss_options(OptionSet& options) {
+void register_lightsss_options(OptionSet &options) {
   options.add("lightsss", &config.enable, "enable LightSSS checkpoints");
   options.add("lightsss-slots", &config.slots,
               "number of checkpoint processes (default 2)");

@@ -7,19 +7,20 @@
 
 namespace {
 
-
 constexpr unsigned kFp32Bits = 32;
 constexpr uint64_t kFp32Sign = 1ull << 31;
 constexpr uint64_t kFp64Sign = 1ull << 63;
 constexpr uint64_t kFp32Box = ~0ull << 32;
 
-inline bool fp_on(const IdealHart* hart) { return (hart->csr.mstatus & kMstatusFs) != 0; }
+inline bool fp_on(const IdealHart *hart) {
+  return (hart->csr.mstatus & kMstatusFs) != 0;
+}
 
-inline void fp_dirty(IdealHart* hart) {
+inline void fp_dirty(IdealHart *hart) {
   hart->csr.mstatus = (hart->csr.mstatus & ~kMstatusFs) | kMstatusFsDirty;
 }
 
-inline bool fp_round(ExecContext* ctx) {
+inline bool fp_round(ExecContext *ctx) {
   unsigned rm = ctx->operands.rm;
   if (rm == 7) {
     rm = static_cast<unsigned>((ctx->hart->fpr.fcsr >> 5) & 7u);
@@ -34,7 +35,7 @@ inline bool fp_round(ExecContext* ctx) {
 
 inline void fp_begin() { softfloat_exceptionFlags = 0; }
 
-inline void fp_finish(ExecContext* ctx, bool writes_fpr) {
+inline void fp_finish(ExecContext *ctx, bool writes_fpr) {
   uint_fast8_t flags =
       static_cast<uint_fast8_t>(softfloat_exceptionFlags & 0x1fu);
   if (flags != 0) {
@@ -47,14 +48,14 @@ inline void fp_finish(ExecContext* ctx, bool writes_fpr) {
   softfloat_exceptionFlags = 0;
 }
 
-inline ExecResult fp_require(ExecContext* ctx, bool rounding) {
+inline ExecResult fp_require(ExecContext *ctx, bool rounding) {
   if (!fp_on(ctx->hart) || (rounding && !fp_round(ctx))) {
     return exec_fault(kExcIllegal, ctx->inst);
   }
   return {};
 }
 
-inline uint64_t fp32_read(const IdealHart* hart, uint8_t rs) {
+inline uint64_t fp32_read(const IdealHart *hart, uint8_t rs) {
   uint64_t value = hart->fpr[rs];
   if ((value >> kFp32Bits) != 0xffffffffu) {
     return 0x7fc00000ull;
@@ -62,13 +63,15 @@ inline uint64_t fp32_read(const IdealHart* hart, uint8_t rs) {
   return static_cast<uint32_t>(value);
 }
 
-inline void fp32_write(IdealHart* hart, uint8_t rd, uint64_t value) {
+inline void fp32_write(IdealHart *hart, uint8_t rd, uint64_t value) {
   hart->fpr[rd] = kFp32Box | static_cast<uint32_t>(value);
 }
 
-inline uint64_t fp64_read(const IdealHart* hart, uint8_t rs) { return hart->fpr[rs]; }
+inline uint64_t fp64_read(const IdealHart *hart, uint8_t rs) {
+  return hart->fpr[rs];
+}
 
-inline void fp64_write(IdealHart* hart, uint8_t rd, uint64_t value) {
+inline void fp64_write(IdealHart *hart, uint8_t rd, uint64_t value) {
   hart->fpr[rd] = value;
 }
 
@@ -120,7 +123,7 @@ inline uint64_t fp_class(uint64_t bits, unsigned mant, unsigned exp) {
 }
 
 inline uint64_t fp_minmax(uint64_t lhs, uint64_t rhs, bool max, unsigned mant,
-                   unsigned exp, bool (*less)(uint64_t, uint64_t)) {
+                          unsigned exp, bool (*less)(uint64_t, uint64_t)) {
   uint64_t sign = fp_sign(lhs, mant, exp);
   if (fp_snan(lhs, mant, exp) || fp_snan(rhs, mant, exp)) {
     softfloat_exceptionFlags |= softfloat_flag_invalid;
@@ -144,7 +147,7 @@ inline uint64_t fp_minmax(uint64_t lhs, uint64_t rhs, bool max, unsigned mant,
 }
 
 inline uint64_t inject(uint64_t lhs, uint64_t rhs, uint64_t sign, bool negate,
-                bool xor_sign) {
+                       bool xor_sign) {
   uint64_t selected = xor_sign ? (lhs ^ rhs) : (negate ? ~rhs : rhs);
   return (lhs & ~sign) | (selected & sign);
 }
@@ -158,13 +161,16 @@ inline bool f64_less(uint64_t lhs, uint64_t rhs) {
   return f64_lt_quiet(float64_t{lhs}, float64_t{rhs});
 }
 
-inline ExecResult load_fp(ExecContext* ctx, unsigned size, bool single) {
+inline ExecResult load_fp(ExecContext *ctx, unsigned size, bool single) {
   ExecResult fault = fp_require(ctx, false);
-  if (fault.fault) return fault;
-  uint64_t addr = ideal_gpr_read(ctx->hart, ctx->operands.rs1) + ctx->operands.imm;
+  if (fault.fault)
+    return fault;
+  uint64_t addr =
+      ideal_gpr_read(ctx->hart, ctx->operands.rs1) + ctx->operands.imm;
   uint64_t raw = 0;
   fault = ideal_load_data(ctx, addr, size, &raw);
-  if (fault.fault) return fault;
+  if (fault.fault)
+    return fault;
   if (single) {
     fp32_write(ctx->hart, ctx->operands.rd, raw);
   } else {
@@ -174,10 +180,12 @@ inline ExecResult load_fp(ExecContext* ctx, unsigned size, bool single) {
   return fault;
 }
 
-inline ExecResult store_fp(ExecContext* ctx, unsigned size, bool single) {
+inline ExecResult store_fp(ExecContext *ctx, unsigned size, bool single) {
   ExecResult fault = fp_require(ctx, false);
-  if (fault.fault) return fault;
-  uint64_t addr = ideal_gpr_read(ctx->hart, ctx->operands.rs1) + ctx->operands.imm;
+  if (fault.fault)
+    return fault;
+  uint64_t addr =
+      ideal_gpr_read(ctx->hart, ctx->operands.rs1) + ctx->operands.imm;
   uint64_t raw = ctx->hart->fpr[ctx->operands.rs2];
   if (single) {
     raw = static_cast<uint32_t>(raw);
@@ -186,9 +194,10 @@ inline ExecResult store_fp(ExecContext* ctx, unsigned size, bool single) {
 }
 
 template <typename Op>
-inline ExecResult binary_fp(ExecContext* ctx, bool single, Op op) {
+inline ExecResult binary_fp(ExecContext *ctx, bool single, Op op) {
   ExecResult fault = fp_require(ctx, true);
-  if (fault.fault) return fault;
+  if (fault.fault)
+    return fault;
   fp_begin();
   uint64_t lhs = single ? fp32_read(ctx->hart, ctx->operands.rs1)
                         : fp64_read(ctx->hart, ctx->operands.rs1);
@@ -204,9 +213,11 @@ inline ExecResult binary_fp(ExecContext* ctx, bool single, Op op) {
   return {};
 }
 
-inline ExecResult fma(ExecContext* ctx, bool single, bool neg_product, bool neg_addend) {
+inline ExecResult fma(ExecContext *ctx, bool single, bool neg_product,
+                      bool neg_addend) {
   ExecResult fault = fp_require(ctx, true);
-  if (fault.fault) return fault;
+  if (fault.fault)
+    return fault;
   fp_begin();
   uint64_t sign = single ? kFp32Sign : kFp64Sign;
   uint64_t lhs = single ? fp32_read(ctx->hart, ctx->operands.rs1)
@@ -237,9 +248,10 @@ inline ExecResult fma(ExecContext* ctx, bool single, bool neg_product, bool neg_
 }
 
 template <typename Op>
-inline ExecResult to_int(ExecContext* ctx, bool word, Op op) {
+inline ExecResult to_int(ExecContext *ctx, bool word, Op op) {
   ExecResult fault = fp_require(ctx, true);
-  if (fault.fault) return fault;
+  if (fault.fault)
+    return fault;
   fp_begin();
   uint64_t result = op();
   if (word) {
@@ -252,9 +264,10 @@ inline ExecResult to_int(ExecContext* ctx, bool word, Op op) {
 }
 
 template <typename Op>
-inline ExecResult from_int(ExecContext* ctx, bool single, Op op) {
+inline ExecResult from_int(ExecContext *ctx, bool single, Op op) {
   ExecResult fault = fp_require(ctx, true);
-  if (fault.fault) return fault;
+  if (fault.fault)
+    return fault;
   fp_begin();
   uint64_t value = ideal_gpr_read(ctx->hart, ctx->operands.rs1);
   uint64_t result = op(value);
@@ -267,9 +280,11 @@ inline ExecResult from_int(ExecContext* ctx, bool single, Op op) {
   return {};
 }
 
-inline ExecResult cmp(ExecContext* ctx, bool single, bool (*op)(uint64_t, uint64_t)) {
+inline ExecResult cmp(ExecContext *ctx, bool single,
+                      bool (*op)(uint64_t, uint64_t)) {
   ExecResult fault = fp_require(ctx, false);
-  if (fault.fault) return fault;
+  if (fault.fault)
+    return fault;
   fp_begin();
   uint64_t lhs = single ? fp32_read(ctx->hart, ctx->operands.rs1)
                         : fp64_read(ctx->hart, ctx->operands.rs1);
@@ -280,9 +295,11 @@ inline ExecResult cmp(ExecContext* ctx, bool single, bool (*op)(uint64_t, uint64
   return {};
 }
 
-inline ExecResult sgnj(ExecContext* ctx, bool single, bool negate, bool xor_sign) {
+inline ExecResult sgnj(ExecContext *ctx, bool single, bool negate,
+                       bool xor_sign) {
   ExecResult fault = fp_require(ctx, false);
-  if (fault.fault) return fault;
+  if (fault.fault)
+    return fault;
   uint64_t sign = single ? kFp32Sign : kFp64Sign;
   uint64_t lhs = single ? fp32_read(ctx->hart, ctx->operands.rs1)
                         : fp64_read(ctx->hart, ctx->operands.rs1);
@@ -320,6 +337,6 @@ inline bool le64(uint64_t lhs, uint64_t rhs) {
   return f64_le(float64_t{lhs}, float64_t{rhs});
 }
 
-}  // namespace
+} // namespace
 
 #endif

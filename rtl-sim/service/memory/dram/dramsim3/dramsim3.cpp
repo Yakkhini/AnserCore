@@ -15,7 +15,7 @@
 namespace {
 
 class DramSim3Model final : public DramModel {
- public:
+public:
   DramSim3Model(std::string ini, std::string outdir);
 
   bool accept(uint64_t address, bool is_write) override {
@@ -23,9 +23,9 @@ class DramSim3Model final : public DramModel {
   }
   bool request(uint64_t address, bool is_write, uint32_t id) override;
   void tick() override { model_->tick(); }
-  bool complete(bool is_write, uint32_t* id) override;
+  bool complete(bool is_write, uint32_t *id) override;
 
- private:
+private:
   std::unique_ptr<CoDRAMsim3> model_;
 };
 
@@ -37,7 +37,7 @@ DramSim3Model::DramSim3Model(std::string ini, std::string outdir) {
   if (ini.empty()) {
     throw std::runtime_error("missing --dramsim3-ini");
   }
-  FILE* file = std::fopen(ini.c_str(), "r");
+  FILE *file = std::fopen(ini.c_str(), "r");
   if (file == nullptr) {
     throw std::runtime_error("cannot open DRAMSim3 config file " + ini);
   }
@@ -49,16 +49,17 @@ DramSim3Model::DramSim3Model(std::string ini, std::string outdir) {
     throw std::runtime_error("cannot create DRAMSim3 output directory " +
                              outdir);
   }
-  model_ = std::make_unique<ComplexCoDRAMsim3>(std::move(ini), std::move(outdir));
+  model_ =
+      std::make_unique<ComplexCoDRAMsim3>(std::move(ini), std::move(outdir));
 }
 
 bool DramSim3Model::request(uint64_t address, bool is_write, uint32_t id) {
   if (!model_->will_accept(address, is_write)) {
     return false;
   }
-  auto* meta = new DramMeta;
+  auto *meta = new DramMeta;
   meta->id = id;
-  auto* dram_request = new CoDRAMRequest(address, is_write, meta);
+  auto *dram_request = new CoDRAMRequest(address, is_write, meta);
   if (!model_->add_request(dram_request)) {
     delete meta;
     delete dram_request;
@@ -67,13 +68,13 @@ bool DramSim3Model::request(uint64_t address, bool is_write, uint32_t id) {
   return true;
 }
 
-bool DramSim3Model::complete(bool is_write, uint32_t* id) {
-  CoDRAMResponse* response =
+bool DramSim3Model::complete(bool is_write, uint32_t *id) {
+  CoDRAMResponse *response =
       is_write ? model_->check_write_response() : model_->check_read_response();
   if (response == nullptr) {
     return false;
   }
-  auto* meta = static_cast<DramMeta*>(response->req->meta);
+  auto *meta = static_cast<DramMeta *>(response->req->meta);
   *id = meta->id;
   delete meta;
   delete response->req;
@@ -81,10 +82,10 @@ bool DramSim3Model::complete(bool is_write, uint32_t* id) {
   return true;
 }
 
-}  // namespace
+} // namespace
 
-std::unique_ptr<DramModel> create_dram(const std::string& ini,
-                                       const std::string& outdir) {
+std::unique_ptr<DramModel> create_dram(const std::string &ini,
+                                       const std::string &outdir) {
   return std::make_unique<DramSim3Model>(ini, outdir);
 }
 

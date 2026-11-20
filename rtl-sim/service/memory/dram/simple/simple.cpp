@@ -7,7 +7,7 @@
 namespace {
 
 class SimpleDram final : public DramModel {
- public:
+public:
   bool accept(uint64_t, bool) override { return true; }
 
   bool request(uint64_t, bool is_write, uint32_t id) override {
@@ -17,8 +17,8 @@ class SimpleDram final : public DramModel {
 
   void tick() override {}
 
-  bool complete(bool is_write, uint32_t* id) override {
-    std::deque<uint32_t>& pending = queue(is_write);
+  bool complete(bool is_write, uint32_t *id) override {
+    std::deque<uint32_t> &pending = queue(is_write);
     if (pending.empty()) {
       return false;
     }
@@ -27,8 +27,8 @@ class SimpleDram final : public DramModel {
     return true;
   }
 
- private:
-  std::deque<uint32_t>& queue(bool is_write) {
+private:
+  std::deque<uint32_t> &queue(bool is_write) {
     return is_write ? writes_ : reads_;
   }
 
@@ -36,7 +36,7 @@ class SimpleDram final : public DramModel {
   std::deque<uint32_t> writes_;
 };
 
-}  // namespace
+} // namespace
 
 #ifndef EMU_DRAMSIM3
 

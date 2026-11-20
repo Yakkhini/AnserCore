@@ -8,17 +8,17 @@
 #endif
 
 class DramModel {
- public:
+public:
   virtual ~DramModel() = default;
   virtual bool accept(uint64_t address, bool is_write) = 0;
   virtual bool request(uint64_t address, bool is_write, uint32_t id) = 0;
   virtual void tick() = 0;
-  virtual bool complete(bool is_write, uint32_t* id) = 0;
+  virtual bool complete(bool is_write, uint32_t *id) = 0;
 };
 
 #ifdef EMU_DRAMSIM3
-std::unique_ptr<DramModel> create_dram(const std::string& ini,
-                                       const std::string& outdir);
+std::unique_ptr<DramModel> create_dram(const std::string &ini,
+                                       const std::string &outdir);
 #else
 std::unique_ptr<DramModel> create_dram();
 #endif

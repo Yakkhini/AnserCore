@@ -34,69 +34,69 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =============================================================================*/
 
+#include "internals.h"
+#include "platform.h"
+#include "softfloat.h"
+#include "specialize.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include "platform.h"
-#include "internals.h"
-#include "specialize.h"
-#include "softfloat.h"
 
-int_fast64_t f64_to_i64( float64_t a, uint_fast8_t roundingMode, bool exact )
-{
-    union ui64_f64 uA;
-    uint_fast64_t uiA;
-    bool sign;
-    int_fast16_t exp;
-    uint_fast64_t sig;
-    int_fast16_t shiftDist;
+int_fast64_t f64_to_i64(float64_t a, uint_fast8_t roundingMode, bool exact) {
+  union ui64_f64 uA;
+  uint_fast64_t uiA;
+  bool sign;
+  int_fast16_t exp;
+  uint_fast64_t sig;
+  int_fast16_t shiftDist;
 #ifdef SOFTFLOAT_FAST_INT64
-    struct uint64_extra sigExtra;
+  struct uint64_extra sigExtra;
 #else
-    uint32_t extSig[3];
+  uint32_t extSig[3];
 #endif
 
-    /*------------------------------------------------------------------------
-    *------------------------------------------------------------------------*/
-    uA.f = a;
-    uiA = uA.ui;
-    sign = signF64UI( uiA );
-    exp  = expF64UI( uiA );
-    sig  = fracF64UI( uiA );
-    /*------------------------------------------------------------------------
-    *------------------------------------------------------------------------*/
-    if ( exp ) sig |= UINT64_C( 0x0010000000000000 );
-    shiftDist = 0x433 - exp;
+  /*------------------------------------------------------------------------
+   *------------------------------------------------------------------------*/
+  uA.f = a;
+  uiA = uA.ui;
+  sign = signF64UI(uiA);
+  exp = expF64UI(uiA);
+  sig = fracF64UI(uiA);
+  /*------------------------------------------------------------------------
+   *------------------------------------------------------------------------*/
+  if (exp)
+    sig |= UINT64_C(0x0010000000000000);
+  shiftDist = 0x433 - exp;
 #ifdef SOFTFLOAT_FAST_INT64
-    if ( shiftDist <= 0 ) {
-        if ( shiftDist < -11 ) goto invalid;
-        sigExtra.v = sig<<-shiftDist;
-        sigExtra.extra = 0;
-    } else {
-        sigExtra = softfloat_shiftRightJam64Extra( sig, 0, shiftDist );
-    }
-    return
-        softfloat_roundToI64(
-            sign, sigExtra.v, sigExtra.extra, roundingMode, exact );
+  if (shiftDist <= 0) {
+    if (shiftDist < -11)
+      goto invalid;
+    sigExtra.v = sig << -shiftDist;
+    sigExtra.extra = 0;
+  } else {
+    sigExtra = softfloat_shiftRightJam64Extra(sig, 0, shiftDist);
+  }
+  return softfloat_roundToI64(sign, sigExtra.v, sigExtra.extra, roundingMode,
+                              exact);
 #else
-    extSig[indexWord( 3, 0 )] = 0;
-    if ( shiftDist <= 0 ) {
-        if ( shiftDist < -11 ) goto invalid;
-        sig <<= -shiftDist;
-        extSig[indexWord( 3, 2 )] = sig>>32;
-        extSig[indexWord( 3, 1 )] = sig;
-    } else {
-        extSig[indexWord( 3, 2 )] = sig>>32;
-        extSig[indexWord( 3, 1 )] = sig;
-        softfloat_shiftRightJam96M( extSig, shiftDist, extSig );
-    }
-    return softfloat_roundMToI64( sign, extSig, roundingMode, exact );
+  extSig[indexWord(3, 0)] = 0;
+  if (shiftDist <= 0) {
+    if (shiftDist < -11)
+      goto invalid;
+    sig <<= -shiftDist;
+    extSig[indexWord(3, 2)] = sig >> 32;
+    extSig[indexWord(3, 1)] = sig;
+  } else {
+    extSig[indexWord(3, 2)] = sig >> 32;
+    extSig[indexWord(3, 1)] = sig;
+    softfloat_shiftRightJam96M(extSig, shiftDist, extSig);
+  }
+  return softfloat_roundMToI64(sign, extSig, roundingMode, exact);
 #endif
-    /*------------------------------------------------------------------------
-    *------------------------------------------------------------------------*/
- invalid:
-    softfloat_raiseFlags( softfloat_flag_invalid );
-    return
-        (exp == 0x7FF) && fracF64UI( uiA ) ? i64_fromNaN
-            : sign ? i64_fromNegOverflow : i64_fromPosOverflow;
-
+  /*------------------------------------------------------------------------
+   *------------------------------------------------------------------------*/
+invalid:
+  softfloat_raiseFlags(softfloat_flag_invalid);
+  return (exp == 0x7FF) && fracF64UI(uiA) ? i64_fromNaN
+         : sign                           ? i64_fromNegOverflow
+                                          : i64_fromPosOverflow;
 }

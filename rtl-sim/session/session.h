@@ -15,8 +15,8 @@ enum class SessionState {
 };
 
 class Session {
- public:
-  explicit Session(int argc, char** argv);
+public:
+  explicit Session(int argc, char **argv);
   ~Session();
 
   void run();
@@ -25,7 +25,7 @@ class Session {
 
   friend void session_fail();
 
- private:
+private:
   SessionState state_;
   // Memory must exist before difftest copies the loaded image into the ref.
   std::vector<std::unique_ptr<SimService>> services_;

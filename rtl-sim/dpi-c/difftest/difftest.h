@@ -16,20 +16,20 @@ struct DifftestConfig {
 
 // Constructing an enabled difftest loads the reference and calls difftest_init.
 class Difftest final : public DpiModule {
- public:
+public:
   explicit Difftest(DifftestConfig config);
   ~Difftest() override;
 
-  void isa_compare(const IsaState& dut);
-  void copy_to_ref(const IsaState& dut);
+  void isa_compare(const IsaState &dut);
+  void copy_to_ref(const IsaState &dut);
   void exec(uint64_t n);
 
- private:
+private:
   DifftestConfig config_;
   std::unique_ptr<RefLibrary> ref_;
 };
 
-void register_difftest_options(OptionSet& options);
+void register_difftest_options(OptionSet &options);
 std::unique_ptr<DpiModule> create_difftest();
 
 #endif

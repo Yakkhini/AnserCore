@@ -36,11 +36,11 @@ Config config;
 
 class VerilatorPlatform;
 
-VerilatorPlatform* current_platform = nullptr;
+VerilatorPlatform *current_platform = nullptr;
 
 class VerilatorPlatform final : public Platform {
- public:
-  VerilatorPlatform(Config parsed, int argc, char** argv);
+public:
+  VerilatorPlatform(Config parsed, int argc, char **argv);
   ~VerilatorPlatform() override;
 
   void tick() override;
@@ -52,7 +52,7 @@ class VerilatorPlatform final : public Platform {
   void open_requested_waveform();
   void at_clone() { dut_->atClone(); }
 
- private:
+private:
   Config config_;
   std::unique_ptr<VerilatedContext> context_;
   std::unique_ptr<VTop> dut_;
@@ -62,7 +62,7 @@ class VerilatorPlatform final : public Platform {
 #endif
 };
 
-VerilatorPlatform::VerilatorPlatform(Config parsed, int argc, char** argv)
+VerilatorPlatform::VerilatorPlatform(Config parsed, int argc, char **argv)
     : config_(std::move(parsed)) {
   context_ = std::make_unique<VerilatedContext>();
   context_->commandArgs(argc, argv);
@@ -146,7 +146,7 @@ bool VerilatorPlatform::open_waveform_file() {
 }
 #endif
 
-}  // namespace
+} // namespace
 
 void open_waveform() {
   if (current_platform != nullptr) {
@@ -160,7 +160,7 @@ void at_clone() {
   }
 }
 
-void register_platform_options(OptionSet& options) {
+void register_platform_options(OptionSet &options) {
   config = Config{};
   options.add("reset-cycles", &config.reset_cycles,
               "reset for N cycles before the main loop (default 50)");
@@ -171,6 +171,6 @@ void register_platform_options(OptionSet& options) {
   options.add("wave-path", &config.wave_path, "waveform output path");
 }
 
-std::unique_ptr<Platform> create_platform(int argc, char** argv) {
+std::unique_ptr<Platform> create_platform(int argc, char **argv) {
   return std::make_unique<VerilatorPlatform>(config, argc, argv);
 }

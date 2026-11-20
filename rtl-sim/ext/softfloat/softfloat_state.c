@@ -34,11 +34,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =============================================================================*/
 
-#include <stdint.h>
-#include "platform.h"
 #include "internals.h"
-#include "specialize.h"
+#include "platform.h"
 #include "softfloat.h"
+#include "specialize.h"
+#include <stdint.h>
 
 #ifndef THREAD_LOCAL
 #define THREAD_LOCAL

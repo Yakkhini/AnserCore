@@ -34,31 +34,28 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =============================================================================*/
 
+#include "internals.h"
+#include "platform.h"
+#include "softfloat.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include "platform.h"
-#include "internals.h"
-#include "softfloat.h"
 
-float64_t i32_to_f64( int32_t a )
-{
-    uint_fast64_t uiZ;
-    bool sign;
-    uint_fast32_t absA;
-    int_fast8_t shiftDist;
-    union ui64_f64 uZ;
+float64_t i32_to_f64(int32_t a) {
+  uint_fast64_t uiZ;
+  bool sign;
+  uint_fast32_t absA;
+  int_fast8_t shiftDist;
+  union ui64_f64 uZ;
 
-    if ( ! a ) {
-        uiZ = 0;
-    } else {
-        sign = (a < 0);
-        absA = sign ? -(uint_fast32_t) a : (uint_fast32_t) a;
-        shiftDist = softfloat_countLeadingZeros32( absA ) + 21;
-        uiZ =
-            packToF64UI(
-                sign, 0x432 - shiftDist, (uint_fast64_t) absA<<shiftDist );
-    }
-    uZ.ui = uiZ;
-    return uZ.f;
-
+  if (!a) {
+    uiZ = 0;
+  } else {
+    sign = (a < 0);
+    absA = sign ? -(uint_fast32_t)a : (uint_fast32_t)a;
+    shiftDist = softfloat_countLeadingZeros32(absA) + 21;
+    uiZ =
+        packToF64UI(sign, 0x432 - shiftDist, (uint_fast64_t)absA << shiftDist);
+  }
+  uZ.ui = uiZ;
+  return uZ.f;
 }

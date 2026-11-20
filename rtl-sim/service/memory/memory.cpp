@@ -17,11 +17,11 @@
 namespace {
 
 MemoryConfig config;
-MemoryService* current = nullptr;
+MemoryService *current = nullptr;
 
-}  // namespace
+} // namespace
 
-MemoryService* current_memory() { return current; }
+MemoryService *current_memory() { return current; }
 
 MemoryService::MemoryService(MemoryConfig parsed) : config_(std::move(parsed)) {
   check_config();
@@ -54,9 +54,9 @@ void MemoryService::check_config() {
   }
 }
 
-bool MemoryService::parse_ram_size(uint64_t* bytes) {
+bool MemoryService::parse_ram_size(uint64_t *bytes) {
   errno = 0;
-  char* end = nullptr;
+  char *end = nullptr;
   unsigned long long value = std::strtoull(config_.ram_size.c_str(), &end, 10);
   if (errno != 0 || end == config_.ram_size.c_str() || value == 0) {
     return false;
@@ -86,7 +86,7 @@ bool MemoryService::parse_ram_size(uint64_t* bytes) {
 }
 
 bool MemoryService::load_image() {
-  FILE* file = std::fopen(config_.image.c_str(), "rb");
+  FILE *file = std::fopen(config_.image.c_str(), "rb");
   if (file == nullptr) {
     return false;
   }
@@ -121,7 +121,7 @@ MemoryService::~MemoryService() {
   }
 }
 
-bool MemoryService::word_index(uint64_t offset, uint64_t* index) const {
+bool MemoryService::word_index(uint64_t offset, uint64_t *index) const {
   if (words_.empty() || offset % 8 != 0) {
     return false;
   }
@@ -137,7 +137,8 @@ void MemoryService::write_word(uint64_t offset, uint64_t data,
                                unsigned char strobe) {
   uint64_t index = 0;
   if (offset % 8 != 0) {
-    std::fprintf(stderr, "memory write is not 8-byte aligned: offset 0x%" PRIx64 "\n",
+    std::fprintf(stderr,
+                 "memory write is not 8-byte aligned: offset 0x%" PRIx64 "\n",
                  offset);
     failed_ = true;
     return;
@@ -161,7 +162,8 @@ void MemoryService::write_word(uint64_t offset, uint64_t data,
 uint64_t MemoryService::read_word(uint64_t offset) {
   uint64_t index = 0;
   if (offset % 8 != 0) {
-    std::fprintf(stderr, "memory read is not 8-byte aligned: offset 0x%" PRIx64 "\n",
+    std::fprintf(stderr,
+                 "memory read is not 8-byte aligned: offset 0x%" PRIx64 "\n",
                  offset);
     failed_ = true;
     return 0;
@@ -180,9 +182,9 @@ unsigned char MemoryService::accept(uint64_t offset, unsigned int id,
   constexpr uint64_t kLineBytes = 64;
   uint64_t bytes = static_cast<uint64_t>(words_.size()) * 8ull;
   if (offset % kLineBytes != 0) {
-    std::fprintf(stderr,
-                 "memory request is not 64-byte aligned: offset 0x%" PRIx64 "\n",
-                 offset);
+    std::fprintf(
+        stderr, "memory request is not 64-byte aligned: offset 0x%" PRIx64 "\n",
+        offset);
     failed_ = true;
     return 0;
   }
@@ -213,7 +215,7 @@ bool MemoryService::on_posedge() {
   return !failed_;
 }
 
-void register_memory_options(OptionSet& options) {
+void register_memory_options(OptionSet &options) {
 #ifdef EMU_DRAMSIM3
   options.add("dramsim3-ini", &config.ini, "DRAMSim3 configuration file");
   options.add("dramsim3-outdir", &config.outdir, "DRAMSim3 output directory");

@@ -11,7 +11,7 @@
 #include "session/options.h"
 #include "session/session.h"
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   OptionSet options;
   register_platform_options(options);
   register_service_options(options);
@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
     session.run();
     session.finish();
     return session.state() != SessionState::kNormal;
-  } catch (const std::exception& error) {
+  } catch (const std::exception &error) {
     std::fprintf(stderr, "%s\n", error.what());
     return 1;
   }
