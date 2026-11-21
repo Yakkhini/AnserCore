@@ -56,8 +56,10 @@ class AnsDataPathSpec extends AnyFlatSpec with ChiselScalatestTester with Matche
         }
         dut.io.fromIQ(first).ready.expect(true.B)
         dut.io.fromIQ(second).ready.expect(true.B)
-        dut.io.toIq.data0Resp(first).bits.ready.expect(true.B)
-        dut.io.toIq.data0Resp(second).bits.ready.expect(false.B)
+        // data0 通过时静默（valid=0），失败时才发 block。
+        dut.io.toIq.data0Resp(first).valid.expect(false.B)
+        dut.io.toIq.data0Resp(second).valid.expect(true.B)
+        dut.io.toIq.data0Resp(second).bits.resp.expect(IssueRespType.block.U)
         dut.io.toIq.data0Cancel(first).expect(false.B)
         dut.io.toIq.data0Cancel(second).expect(true.B)
         dut.io.toIq.data0CancelToDispatch(second).pdest.expect(12.U)
@@ -74,7 +76,7 @@ class AnsDataPathSpec extends AnyFlatSpec with ChiselScalatestTester with Matche
 
         // 失去读口的一方重新尝试，此时必须读到自己的地址。
         dut.io.fromIQ(second).valid.poke(true.B)
-        dut.io.toIq.data0Resp(second).bits.ready.expect(true.B)
+        dut.io.toIq.data0Resp(second).valid.expect(false.B)
         dut.io.toIq.data0Cancel(second).expect(false.B)
         dut.clock.step()
         dut.io.fromIQ(second).valid.poke(false.B)
@@ -84,7 +86,7 @@ class AnsDataPathSpec extends AnyFlatSpec with ChiselScalatestTester with Matche
         // EXU 拒绝通过 data1Resp 通知重试；DataPath 下一拍不保持这次尝试。
         dut.io.toExu(second).ready.poke(false.B)
         dut.io.toIq.data1Resp(second).valid.expect(true.B)
-        dut.io.toIq.data1Resp(second).bits.ready.expect(false.B)
+        dut.io.toIq.data1Resp(second).bits.resp.expect(IssueRespType.block.U)
         dut.io.toIq.data1Cancel(second).expect(true.B)
         dut.clock.step()
         dut.io.toExu(second).valid.expect(false.B)

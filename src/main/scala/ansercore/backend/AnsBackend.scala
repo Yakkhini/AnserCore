@@ -5,8 +5,8 @@
  * 前端接口（指令输入、stall/redirect）和未来的访存接口；ROB 提交、CSR 状态、调度反馈等
  * 都属于后端内部总线，不再出现在 AnsBackendIO 中。
  *
- * 当前 CtrlBlock（内含 Dispatch）已存在；CSR/ROB 用 `AnsCsrStub`/`AnsRobStub` 占位，
- * IQ/LSQ/Scheduler 反馈暂用内部常量驱动。
+ * 当前 CtrlBlock（内含 Dispatch）已存在；CSR 仍使用 `AnsCsrStub`，ROB 已接入
+ * `AnsRob` 框架，IQ/LSQ/Scheduler 的部分反馈暂用内部常量驱动。
  */
 package ansercore.backend
 
@@ -18,7 +18,7 @@ import ansercore.backend.dispatch._
 import ansercore.backend.exu.csr.AnsCsrStub
 import ansercore.backend.issue._
 import ansercore.backend.rename._
-import ansercore.backend.rob.AnsRobStub
+import ansercore.backend.rob.AnsRob
 
 /** Backend 调试镜像；只用于 bring-up，不参与功能握手。 */
 class AnsBackendDebugIO(override val params: BundleParams = BundleParams()) extends AnsCtrlBlockDebugIO(params) {
@@ -57,7 +57,16 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
 
   // ---- internal backend modules ----
   val csr = Module(new AnsCsrStub(params))
-  val rob = Module(new AnsRobStub(params))
+  val rob = Module(new AnsRob(params, writebackPorts = AnsIssueParams.nExu))
+
+  // ROB boundary placeholders: route the real redirect arbiter / completion buses here later.
+  rob.io.redirectIn             := 0.U.asTypeOf(rob.io.redirectIn)
+  rob.io.writeback              := 0.U.asTypeOf(rob.io.writeback)
+  rob.io.lsq.mmioBusy           := false.B
+  rob.io.csr.intrBitSet         := false.B
+  rob.io.csr.trapTarget         := 0.U
+  rob.io.csr.wfiEvent           := false.B
+  rob.io.csr.criticalErrorState := false.B
 
   ctrlBlock.io.fromCsr       := csr.io.decodeState
   ctrlBlock.io.disableFusion := csr.io.disableFusion
@@ -125,27 +134,46 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
   }
   require(iqExuPort == AnsIssueParams.nExu, "IQ valid-count exu accounting mismatch")
 
-  // ---- IQ 唤醒总线：全局合流后统一打一拍，避免组合环 ----
+  // ---- IQ 唤醒总线 ----
+  // 所有 Scheduler 的 wakeupOut 先按 exuIdx 合流，再由 `registerWakeupBroadcast` 决定
+  // 是否打一拍：
+  //   true（默认）：切断 "IQ 选择 -> 唤醒队列 -> 全后端合流 -> 所有 IQ 源状态比较"
+  //                这条组合路径，代价是 0-lat 依赖链多一拍；
+  //   false（预留）：香山式组合广播。启用前必须同步修改 AnsEntry 的唤醒命中数据源
+  //                （bypass2 -> bypass1）并补齐 0-lat 取消回滚，否则会读错旁路周期。
+  // 详见 markdown/IssueQueue 设计文档 §5.5。
   val wakeupRaw = Wire(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
   for (e <- 0 until AnsIssueParams.nExu) {
     val cands = schedulers.map(_._1.io.wakeupOut(e))
     wakeupRaw(e).valid := VecInit(cands.map(_.valid)).asUInt.orR
     wakeupRaw(e).bits  := Mux(cands(0).valid, cands(0).bits, Mux(cands(1).valid, cands(1).bits, cands(2).bits))
   }
-  val wakeupReg = Reg(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
+  val wakeupGated = Wire(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
   for (e <- 0 until AnsIssueParams.nExu) {
-    wakeupReg(e).valid := wakeupRaw(e).valid && !AnsIssueUtils.needFlush(wakeupRaw(e).bits.robIdx, issueFlush)
-    wakeupReg(e).bits  := wakeupRaw(e).bits
+    wakeupGated(e).valid := wakeupRaw(e).valid && !AnsIssueUtils.needFlush(wakeupRaw(e).bits.robIdx, issueFlush)
+    wakeupGated(e).bits  := wakeupRaw(e).bits
+  }
+  // wakeupBus 是本轮实现的唤醒广播结果：默认是打一拍版本，换成组合广播只需改这个开关。
+  val wakeupBus = Wire(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
+  if (params.registerWakeupBroadcast) {
+    val wakeupReg = Reg(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
+    for (e <- 0 until AnsIssueParams.nExu) {
+      wakeupReg(e) := wakeupGated(e)
+    }
+    wakeupBus := wakeupReg
+  } else {
+    // NOTE: 保持结构预留。直接启用会与 AnsEntry 的 bypass2 映射和数据0取消时序冲突。
+    wakeupBus := wakeupGated
   }
   for ((schd, _) <- schedulers) {
-    schd.io.wakeupIn := wakeupReg
+    schd.io.wakeupIn := wakeupBus
   }
 
   // ---- 唤醒 / 写回 -> Dispatch ----
   val dispatchWakeup = Wire(new AnsIQWakeUpVec(params))
   dispatchWakeup         := 0.U.asTypeOf(dispatchWakeup)
   for ((exuIdx, k) <- AnsIssueParams.intWakeUpExuIdx.zipWithIndex) {
-    val w = wakeupReg(exuIdx)
+    val w = wakeupBus(exuIdx)
     dispatchWakeup.wakeUpInt(k).valid       := w.valid
     dispatchWakeup.wakeUpInt(k).bits.rfWen  := w.bits.intWen
     dispatchWakeup.wakeUpInt(k).bits.fpWen  := w.bits.fpWen
@@ -154,7 +182,7 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
     dispatchWakeup.wakeUpInt(k).bits.is0Lat := w.bits.is0Lat
   }
   for ((exuIdx, k) <- AnsIssueParams.fpWakeUpExuIdx.zipWithIndex) {
-    val w = wakeupReg(exuIdx)
+    val w = wakeupBus(exuIdx)
     dispatchWakeup.wakeUpFp(k).valid       := w.valid
     dispatchWakeup.wakeUpFp(k).bits.rfWen  := w.bits.intWen
     dispatchWakeup.wakeUpFp(k).bits.fpWen  := w.bits.fpWen

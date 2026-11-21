@@ -177,6 +177,10 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
   val data1Valid = RegInit(VecInit(Seq.fill(nExu)(false.B)))
   val data1Data  = Reg(Vec(nExu, issueShape))
 
+  // 旁路深度与 AnsBackend.registerWakeupBroadcast / AnsEntry.iqWakeupHitDataSource 绑定：
+  // 当前唤醒广播打一拍，消费者命中后距 data1 还有两拍，正好对应 bypass2；
+  // 若改为组合广播（香山式 0-lat 同拍唤醒），这里应同步改用 bypass1。
+  // 详见 markdown/IssueQueue 设计文档 §5.5。
   val exuOutBypass1 = RegNext(io.exuOutput)
   val exuOutBypass2 = RegNext(exuOutBypass1)
   val prevFlush     = RegNext(io.flush)
@@ -216,13 +220,16 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
     val data1OutFlush   = AnsIssueUtils.needFlush(data1Data(e).common.robIdx, io.flush) ||
       AnsIssueUtils.needFlush(data1Data(e).common.robIdx, prevFlush)
 
-    io.toIq.data0Resp(e).valid              := data0.valid
-    io.toIq.data0Resp(e).bits.ready         := notBlock
+    // data0 只在失败时发 block；通过时静默（valid=0），条目据此把 timer 推进到 data1。
+    val data0Blocked = data0.valid && !notBlock
+
+    io.toIq.data0Resp(e).valid              := data0Blocked
+    io.toIq.data0Resp(e).bits.resp          := IssueRespType.block.U
     io.toIq.data0Resp(e).bits.robIdx        := data0.bits.common.robIdx
     io.toIq.data0Resp(e).bits.fuType        := data0.bits.common.fuType
-    io.toIq.data0Cancel(e)                  := data0.valid && !notBlock
-    io.toIq.data0CancelToDispatch(e).intWen := data0.valid && !notBlock && data0.bits.common.intWen
-    io.toIq.data0CancelToDispatch(e).fpWen  := data0.valid && !notBlock && data0.bits.common.fpWen
+    io.toIq.data0Cancel(e)                  := data0Blocked
+    io.toIq.data0CancelToDispatch(e).intWen := data0Blocked && data0.bits.common.intWen
+    io.toIq.data0CancelToDispatch(e).fpWen  := data0Blocked && data0.bits.common.fpWen
     io.toIq.data0CancelToDispatch(e).pdest  := data0.bits.common.pdest
 
     // 接收即消费本次尝试；失败由响应通知 IQ 重试，不在 data0/data1 保持等待。
@@ -234,10 +241,16 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
     }
 
     io.toIq.data1Resp(e).valid       := data1Valid(e)
-    io.toIq.data1Resp(e).bits.ready  := Mux(data1OutFlush, true.B, io.toExu(e).ready)
+    io.toIq.data1Resp(e).bits.resp   := Mux(
+      data1OutFlush,
+      IssueRespType.success.U,
+      Mux(io.toExu(e).ready, IssueRespType.success.U, IssueRespType.block.U),
+    )
     io.toIq.data1Resp(e).bits.robIdx := data1Data(e).common.robIdx
     io.toIq.data1Resp(e).bits.fuType := data1Data(e).common.fuType
-    io.toIq.data1Cancel(e)           := data1Valid(e) && !data1OutFlush && !io.toExu(e).ready
+    // data1Cancel 与响应同源（resp=block），对外显示一致；条目本身由 resp=block 重发。
+    io.toIq.data1Cancel(e) := io.toIq.data1Resp(e).valid &&
+      IssueRespType.isBlocked(io.toIq.data1Resp(e).bits.resp)
     io.toIq.rcDest(e)                := (if (exu.intWbPort >= 0) rc.io.replaceIdx(exu.intWbPort) else 0.U)
 
     // ---- data1 operand selection ----
@@ -268,6 +281,11 @@ class AnsDataPath(val params: BundleParams = BundleParams()) extends Module {
       val imm     = ImmPacking.extend(data1Data(e).common.imm, data1Data(e).common.immType, params.xlen)
       // forward 需要 EXU 组合输出；当前 IQ 唤醒打一拍，只用 1/2 拍旁路，
       // 这里不复用 io.exuOutput 的组合路径，避免组合环。
+      //
+      // 预留：若开启香山式 0-lat 同拍唤醒（AnsEntry 级 canIssueBypass + 组合广播），
+      // 这里应改成与 by1/by2 相同的 exuSelect：
+      //   val fwd = exuSelect(s, io.exuOutput.map(_.bits.data(0)), io.exuOutput.map(_.valid))
+      // 前提是取消回滚路径已经补齐（见 markdown/IssueQueue 设计文档 §5.5）。
       val fwd     = 0.U(params.xlen.W)
       val by1     = exuSelect(s, exuOutBypass1.map(_.bits.data(0)), exuOutBypass1.map(_.valid))
       val by2     = exuSelect(s, exuOutBypass2.map(_.bits.data(0)), exuOutBypass2.map(_.valid))

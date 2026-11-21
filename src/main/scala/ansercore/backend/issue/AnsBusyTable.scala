@@ -43,8 +43,8 @@ class AnsFuBusyTableWrite(
   val data0Match = matchVec(io.data0Resp.bits.fuType)
   val data1Match = matchVec(io.data1Resp.bits.fuType)
 
-  val data0Fail = io.data0Resp.valid && !io.data0Resp.bits.ready
-  val data1Fail = io.data1Resp.valid && !io.data1Resp.bits.ready
+  val data0Fail = io.data0Resp.valid && IssueRespType.isBlocked(io.data0Resp.bits.resp)
+  val data1Fail = io.data1Resp.valid && IssueRespType.isBlocked(io.data1Resp.bits.resp)
 
   val shift           = (table >> 1).asUInt
   val deqSetShift     = Mux(io.deqValid, deqMatch >> 1, 0.U(tableSize.W))

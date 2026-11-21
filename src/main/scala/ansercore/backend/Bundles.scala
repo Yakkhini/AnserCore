@@ -74,6 +74,16 @@ object Bundles {
     intRegCacheEntries:  Int = 16,
     /** Memory RegCache entries / 访存寄存器缓存条目数. */
     memRegCacheEntries:  Int = 12,
+    /** IQ 唤醒广播是否在 Backend 合流后打一拍.
+      *
+      * true（当前默认）：切断 "IQ 选择 -> 唤醒队列 -> 全后端合流 -> 所有 IQ 的源状态比较"
+      * 这条组合路径，代价是 0-lat 依赖链多一拍。
+      *
+      * false（预留）：香山式组合广播。启用前必须同步把 `AnsEntry` 的唤醒命中数据源从
+      * bypass2 改为 bypass1，并补齐 0-lat 取消回滚；否则会读到错误的旁路周期。
+      * 详见 markdown/IssueQueue 设计文档 §5.5。
+      */
+    registerWakeupBroadcast: Boolean = true,
   ) {
     require(xlen > 0, "xlen must be positive")
     require(pcWidth > 0, "pcWidth must be positive")
@@ -237,6 +247,9 @@ object Bundles {
   object DataSource {
     val width        = 4
     val zero         = 0
+    /** 组合 forward：直接使用 EXU 当拍输出。
+      * 当前 IQ 唤醒广播打一拍，DataPath 的 forward 通路恒为 0（见 AnsDataPath 的 fwd），
+      * 该编码只为将来 0-lat 同拍发射预留，与香山保持一致。 */
     val forward      = 1
     val bypass       = 2
     val bypass2      = 3
@@ -1274,15 +1287,35 @@ object Bundles {
     val needed = Bool()
   }
 
+  /** Per-stage issue response encoding / 每个流水级的响应编码.
+    *
+    *   - `block`     : 这一级没有通过，条目必须清 issued 并重新发射；
+    *   - `uncertain` : 这一级通过了，但最终结果还要等后续阶段（访存/向量反馈），条目既不清理也不重发；
+    *   - `success`   : 最终完成，条目可以清除。
+    *
+    * 编码与香山的 RespType 一致。当前 AnserCore 只产生 block/success，uncertain 为预留语义。
+    */
+  object IssueRespType {
+    val width     = 2
+    val block     = 0
+    val uncertain = 1
+    val success   = 3
+
+    def isBlocked(resp:   UInt): Bool = resp === block.U
+    def isUncertain(resp: UInt): Bool = resp === uncertain.U
+    def isSuccess(resp:   UInt): Bool = resp === success.U
+  }
+
   /** One issue-queue entry response / 一个发射队列条目的响应.
     *
-    * `ready = 0` means the instruction was blocked at this pipeline stage and must re-issue. `fuType` is echoed back so
-    * busy tables can release the correct slot.
+    * `resp = block` 表示这一级没有通过，指令需要重发；`success` 表示可以清除条目；
+    * `uncertain` 表示这一级通过但还不是最终完成（当前未产生，留给访存/向量反馈）。
+    * `fuType` 回送以便忙表释放正确的延迟槽。
     */
   class IssueEntryResponse(val params: BundleParams = BundleParams()) extends Bundle {
     val robIdx = UInt(params.robIndexWidth.W)
     val fuType = FuType()
-    val ready  = Bool()
+    val resp   = UInt(IssueRespType.width.W)
   }
 
   /** Issue queue to datapath / 发射队列到数据通路的接口. */

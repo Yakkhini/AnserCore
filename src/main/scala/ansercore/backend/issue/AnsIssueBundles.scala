@@ -99,11 +99,12 @@ class AnsSelectedEntry(val params: BundleParams, val iq: AnsIssueQueueParams) ex
   val cancel         = Bool()
 }
 
+/** 访存 final resp 与 Issue 响应共用同一套三值编码。 */
 object AnsRespType {
-  val width     = 2
-  val block     = 0
-  val uncertain = 1
-  val success   = 3
+  val width     = IssueRespType.width
+  val block     = IssueRespType.block
+  val uncertain = IssueRespType.uncertain
+  val success   = IssueRespType.success
 }
 
 /** 出队响应（用于 memory 的 final resp，本版只用到 robIdx）。 */

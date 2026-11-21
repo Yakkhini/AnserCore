@@ -67,11 +67,11 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
       dut.io.data0Resp(d).valid.poke(false.B)
       dut.io.data0Resp(d).bits.robIdx.poke(0.U)
       dut.io.data0Resp(d).bits.fuType.poke(0.U)
-      dut.io.data0Resp(d).bits.ready.poke(false.B)
+      dut.io.data0Resp(d).bits.resp.poke(IssueRespType.block.U)
       dut.io.data1Resp(d).valid.poke(false.B)
       dut.io.data1Resp(d).bits.robIdx.poke(0.U)
       dut.io.data1Resp(d).bits.fuType.poke(0.U)
-      dut.io.data1Resp(d).bits.ready.poke(false.B)
+      dut.io.data1Resp(d).bits.resp.poke(IssueRespType.block.U)
       dut.io.wbBusyTableRead(d).intWbBusyTable.poke(0.U)
       dut.io.wbBusyTableRead(d).fpWbBusyTable.poke(0.U)
       dut.io.deq(d).ready.poke(true.B)
@@ -102,18 +102,18 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
     dut.io.enq(0).valid.poke(false.B)
   }
 
-  /** 用同一个 robIdx/端口把 data0/data1 响应依次送给对应条目。 */
+  /** 模拟 DataPath：data0 通过时静默，下一拍 data1 success 才清除已发射条目。 */
   private def respond(dut: AnsIssueQueue, robIdx: Int): Unit = {
     val aluPort = 0
-    for (stage <- 0 until 2) {
-      val resp = if (stage == 0) dut.io.data0Resp(aluPort) else dut.io.data1Resp(aluPort)
-      resp.valid.poke(true.B)
-      resp.bits.robIdx.poke(robIdx.U)
-      resp.bits.fuType.poke(FuType.alu.U)
-      resp.bits.ready.poke(true.B)
-      dut.clock.step()
-      resp.valid.poke(false.B)
-    }
+    val resp    = dut.io.data1Resp(aluPort)
+    // data0 静默（保持 idle 的 valid=0），推进一拍到 data1 阶段。
+    dut.clock.step()
+    resp.valid.poke(true.B)
+    resp.bits.robIdx.poke(robIdx.U)
+    resp.bits.fuType.poke(FuType.alu.U)
+    resp.bits.resp.poke(IssueRespType.success.U)
+    dut.clock.step()
+    resp.valid.poke(false.B)
   }
 
   behavior of "AnsIssueQueue"
@@ -289,6 +289,89 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
         cycles += 1
       }
       seen shouldBe true
+    }
+  }
+
+  /** 0-lat 唤醒 -> 发射延迟骨架。
+    *
+    * 生产者（ALU，pdest = 7）与消费者（ALU，等 pdest = 7）同时入队。测试台模拟 AnsBackend 的
+    * 唤醒广播：本拍观察 `wakeupToIQ(0)`，下一拍送回 `wakeUpFromIQ(0)`
+    * （对应 `registerWakeupBroadcast = true`）。
+    *
+    * 当前期望：生产者与消费者的 deq 相差 2 拍，且消费者读到 bypass2。
+    * 若将来开启香山式组合广播（`registerWakeupBroadcast = false`）并把
+    * `AnsEntry.iqWakeupHitDataSource` 改成 bypass，差值应变成 1，
+    * 届时同步修改测试台的打拍方式和这里的期望值。详见 IssueQueue 设计文档 §5.5。
+    */
+  it should "measure 0-lat IQ wakeup to issue latency" in {
+    test(new AnsIssueQueue(params, iq)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      reset(dut)
+
+      val prod = dut.io.enq(0).bits
+      clearDynInst(prod)
+      prod.fuType.poke(FuType.alu.U)
+      prod.robIdx.poke(1.U)
+      prod.pdest.poke(7.U)
+      prod.intWen.poke(true.B)
+      for (j <- 0 until params.numSrc) {
+        prod.srcType(j).poke(SrcType.immediate.U)
+      }
+      dut.io.enq(0).valid.poke(true.B)
+
+      val cons = dut.io.enq(1).bits
+      clearDynInst(cons)
+      cons.fuType.poke(FuType.alu.U)
+      cons.robIdx.poke(2.U)
+      cons.pdest.poke(8.U)
+      cons.intWen.poke(true.B)
+      cons.psrc(0).poke(7.U)
+      cons.srcType(0).poke(SrcType.integer.U)
+      cons.srcState(0).poke(SourceState.waiting.U)
+      dut.io.enq(1).valid.poke(true.B)
+
+      dut.io.enq(0).ready.expect(true.B)
+      dut.io.enq(1).ready.expect(true.B)
+      dut.clock.step()
+      dut.io.enq(0).valid.poke(false.B)
+      dut.io.enq(1).valid.poke(false.B)
+
+      var lastWakeupValid = false
+      var lastPdest       = 0
+      var lastIs0Lat      = false
+      var producerDeq     = -1
+      var consumerDeq     = -1
+      var cycle           = 0
+      while (cycle < 20 && (producerDeq < 0 || consumerDeq < 0)) {
+        // 打入上一拍捕获的唤醒（对应 AnsBackend 的 registerWakeupBroadcast = true）。
+        dut.io.wakeUpFromIQ(0).valid.poke(lastWakeupValid.B)
+        dut.io.wakeUpFromIQ(0).bits.pdest.poke(lastPdest.U)
+        dut.io.wakeUpFromIQ(0).bits.intWen.poke(true.B)
+        dut.io.wakeUpFromIQ(0).bits.fpWen.poke(false.B)
+        dut.io.wakeUpFromIQ(0).bits.is0Lat.poke(lastIs0Lat.B)
+        dut.io.wakeUpFromIQ(0).bits.robIdx.poke(0.U)
+        dut.io.wakeUpFromIQ(0).bits.loadDependency.foreach(_.poke(0.U))
+        dut.io.wakeUpFromIQ(0).bits.rcDest.poke(0.U)
+
+        if (dut.io.deq(0).valid.peek().litToBoolean) {
+          val pdest = dut.io.deq(0).bits.common.pdest.peek().litValue.toInt
+          if (pdest == 7 && producerDeq < 0) producerDeq = cycle
+          if (pdest == 8 && consumerDeq < 0) {
+            consumerDeq = cycle
+            // 消费者被 IQ 唤醒，当前应读 bypass2（与广播打一拍绑定）。
+            dut.io.deq(0).bits.common.dataSources(0).expect(DataSource.bypass2.U)
+          }
+        }
+
+        lastWakeupValid = dut.io.wakeupToIQ(0).valid.peek().litToBoolean
+        lastPdest       = dut.io.wakeupToIQ(0).bits.pdest.peek().litValue.toInt
+        lastIs0Lat      = dut.io.wakeupToIQ(0).bits.is0Lat.peek().litToBoolean
+        dut.clock.step()
+        cycle += 1
+      }
+
+      producerDeq should be >= 0
+      consumerDeq should be >= 0
+      (consumerDeq - producerDeq) shouldBe 2
     }
   }
 }

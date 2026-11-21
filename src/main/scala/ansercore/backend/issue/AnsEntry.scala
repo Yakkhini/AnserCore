@@ -70,6 +70,15 @@ object AnsEntry {
     exuSource:  UInt,
   )
 
+  /** 本拍 IQ 唤醒命中后该源采用的数据源档位。
+    *
+    * 与 AnsBackend 的 `registerWakeupBroadcast` 绑定：唤醒在 Backend 合流后打一拍才到达，
+    * 消费者进入 data1 时生产者的结果正好落在 bypass2。
+    * 若将来关闭 `registerWakeupBroadcast`（香山式组合广播），这里必须同步改成
+    * `DataSource.bypass`，并按设计文档 §5.5 补齐 DataPath forward 与取消回滚。
+    */
+  val iqWakeupHitDataSource: Int = DataSource.bypass2
+
 }
 
 class AnsEntry(
@@ -110,6 +119,12 @@ class AnsEntry(
     enabled:    Bool,
     dataSource: Int,
   ): Seq[WakeupCandidate] = wakeups.zip(iq.wakeupSourceExuIdx).map { case (w, exuIdx) =>
+    // 0-lat 唤醒(推测唤醒)在生产者的 data0 结果出来之前就已广播，因此必须允许撤销：
+    // 当前广播在 Backend 打了一拍，生产者的 data0Cancel 与本拍唤醒同拍到达，用
+    // `!cancelled` 挡掉即可，不需要回滚已经置 ready 的源。
+    // TODO(0-lat 同拍发射): 若改为组合广播或 entry 级 canIssueBypass，取消会晚于源被
+    //   置 ready 一拍，必须增加“已发射回滚/重发”路径（参考香山
+    //   srcWakeupByIQButCancel / cancelBypass）。详见设计文档 §5.5。
     val cancelled = (cancel(exuIdx) && w.bits.is0Lat) ||
       AnsIssueUtils.isLoadCancelled(w.bits.loadDependency, io.ldCancel)
     WakeupCandidate(
@@ -142,8 +157,9 @@ class AnsEntry(
     }
   }
 
-  val respSuccess = selResp.valid && selResp.bits.ready
-  val respBlock   = selResp.valid && !selResp.bits.ready
+  val respSuccess = selResp.valid && IssueRespType.isSuccess(selResp.bits.resp)
+  val respBlock   = selResp.valid && IssueRespType.isBlocked(selResp.bits.resp)
+  // uncertain：既不清除也不重发，timer 自然推进到下一阶段
 
   // 入队延迟补查后的当前状态
   val currentStatus = WireInit(entryReg.status)
@@ -157,7 +173,7 @@ class AnsEntry(
 
   for (s <- 0 until params.numSrc) {
     val src   = entryReg.status.srcStatus(s)
-    val iqNow = iqCandidates(src, io.wakeUpFromIQ, io.data0Cancel, true.B, DataSource.bypass2)
+    val iqNow = iqCandidates(src, io.wakeUpFromIQ, io.data0Cancel, true.B, AnsEntry.iqWakeupHitDataSource)
     val iqD1  = iqCandidates(src, io.enqWakeUpIQ1, io.enqData0Cancel1, enqDelayActive, DataSource.registerFile)
     val iqD2  = iqCandidates(src, io.enqWakeUpIQ2, io.enqData0Cancel2, enqDelayActive, DataSource.registerFile)
     val wbNow = wbCandidates(src, io.wakeUpFromWB, true.B)
@@ -180,7 +196,8 @@ class AnsEntry(
       Mux(ldCanc, SourceState.waiting.U(SourceState.width.W), src.srcState),
     )
 
-    // Backend 已将 IQ 唤醒打一拍；消费者进入 data1 时使用 bypass2。
+    // Backend 已将 IQ 唤醒打一拍；消费者进入 data1 时使用 bypass2
+    // （档位定义在 AnsEntry.iqWakeupHitDataSource，与广播打拍开关绑定）。
     // 没有新唤醒时，旁路来源下一拍衰减为 PRF。
     val bypassExpires = DataSource.readBypass(src.dataSources) ||
       DataSource.readBypass2(src.dataSources) || DataSource.readForward(src.dataSources)
@@ -204,7 +221,7 @@ class AnsEntry(
   }
 
   val issuedNext = Mux(
-    io.deqSel,
+    io.deqSel && !anyLoadCancel,
     true.B,
     Mux(respBlock || anyLoadCancel, false.B, entryReg.status.issued),
   )

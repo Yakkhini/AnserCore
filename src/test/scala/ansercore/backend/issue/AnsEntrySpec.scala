@@ -157,7 +157,7 @@ class AnsEntrySpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
       dut.io.isFirstIssue.expect(false.B)
       dut.io.issueTimerRead.expect(AnsIssueTimer.data0.U)
       dut.io.data0Resp(0).valid.poke(true.B)
-      dut.io.data0Resp(0).bits.ready.poke(false.B)
+      dut.io.data0Resp(0).bits.resp.poke(IssueRespType.block.U)
       dut.clock.step()
       dut.io.data0Resp(0).valid.poke(false.B)
       dut.io.issued.expect(false.B)
@@ -170,9 +170,38 @@ class AnsEntrySpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
       dut.clock.step()
       dut.io.issueTimerRead.expect(AnsIssueTimer.data1.U)
       dut.io.data1Resp(0).valid.poke(true.B)
-      dut.io.data1Resp(0).bits.ready.poke(true.B)
+      dut.io.data1Resp(0).bits.resp.poke(IssueRespType.success.U)
       dut.clock.step()
       dut.io.valid.expect(false.B)
+    }
+  }
+
+  it should "treat uncertain as 'stage passed but not final' without clearing or re-issuing" in {
+    test(new AnsEntry(params, iq, isEnq = false)) { dut =>
+      init(dut, ready = true)
+      dut.io.deqSel.poke(true.B)
+      dut.clock.step()
+      dut.io.deqSel.poke(false.B)
+      dut.io.issueTimerRead.expect(AnsIssueTimer.data0.U)
+
+      // data0 返回 uncertain：条目保持在飞行中，timer 推进到 data1。
+      dut.io.data0Resp(0).valid.poke(true.B)
+      dut.io.data0Resp(0).bits.resp.poke(IssueRespType.uncertain.U)
+      dut.clock.step()
+      dut.io.data0Resp(0).valid.poke(false.B)
+      dut.io.issued.expect(true.B)
+      dut.io.valid.expect(true.B)
+      dut.io.canIssue.expect(false.B)
+      dut.io.issueTimerRead.expect(AnsIssueTimer.data1.U)
+
+      // data1 再返回 uncertain：仍然保持，不清除、不重发。
+      dut.io.data1Resp(0).valid.poke(true.B)
+      dut.io.data1Resp(0).bits.resp.poke(IssueRespType.uncertain.U)
+      dut.clock.step()
+      dut.io.data1Resp(0).valid.poke(false.B)
+      dut.io.issued.expect(true.B)
+      dut.io.valid.expect(true.B)
+      dut.io.canIssue.expect(false.B)
     }
   }
 }

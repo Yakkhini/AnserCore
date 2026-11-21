@@ -101,11 +101,11 @@ class AnsSchedulerSpec extends AnyFlatSpec with ChiselScalatestTester with Match
       dut.io.fromDataPath.data0Resp(p).valid.poke(false.B)
       dut.io.fromDataPath.data0Resp(p).bits.robIdx.poke(0.U)
       dut.io.fromDataPath.data0Resp(p).bits.fuType.poke(0.U)
-      dut.io.fromDataPath.data0Resp(p).bits.ready.poke(false.B)
+      dut.io.fromDataPath.data0Resp(p).bits.resp.poke(IssueRespType.block.U)
       dut.io.fromDataPath.data1Resp(p).valid.poke(false.B)
       dut.io.fromDataPath.data1Resp(p).bits.robIdx.poke(0.U)
       dut.io.fromDataPath.data1Resp(p).bits.fuType.poke(0.U)
-      dut.io.fromDataPath.data1Resp(p).bits.ready.poke(false.B)
+      dut.io.fromDataPath.data1Resp(p).bits.resp.poke(IssueRespType.block.U)
       dut.io.fromDataPath.data0Cancel(p).poke(false.B)
       dut.io.fromDataPath.data1Cancel(p).poke(false.B)
       dut.io.fromDataPath.data0CancelToDispatch(p).intWen.poke(false.B)
@@ -150,15 +150,18 @@ class AnsSchedulerSpec extends AnyFlatSpec with ChiselScalatestTester with Match
     dut.io.fromDispatch(port).valid.poke(false.B)
   }
 
-  /** 模拟 DataPath：deq.valid 当拍回 data0Resp，使已发射 entry 被清除。 */
-  private def answerDeq(dut: AnsSchedulerBase): Unit = {
-    for ((port, exuName) <- Seq(staDeq -> "STA0", stdDeq -> "STD0")) {
-      val fired = dut.io.deq(port).valid.peek().litToBoolean
-      val resp  = dut.io.fromDataPath.data0Resp(AnsIssueParams.exuIdxOf(exuName))
-      resp.valid.poke(fired.B)
+  /** 模拟 DataPath：data0 通过时静默；把上一拍观察到的 deq 在 data1 回 success。 */
+  private def answerDeq(dut: AnsSchedulerBase, pending: Array[Boolean]): Unit = {
+    val ports = Seq(staDeq -> "STA0", stdDeq -> "STD0")
+    ports.zipWithIndex.foreach { case ((_, exuName), idx) =>
+      val resp = dut.io.fromDataPath.data1Resp(AnsIssueParams.exuIdxOf(exuName))
+      resp.valid.poke(pending(idx).B)
       resp.bits.robIdx.poke(0.U)
       resp.bits.fuType.poke(0.U)
-      resp.bits.ready.poke(fired.B)
+      resp.bits.resp.poke(IssueRespType.success.U)
+    }
+    ports.zipWithIndex.foreach { case ((port, _), idx) =>
+      pending(idx) = dut.io.deq(port).valid.peek().litToBoolean
     }
   }
 
@@ -226,8 +229,9 @@ class AnsSchedulerSpec extends AnyFlatSpec with ChiselScalatestTester with Match
       // 只唤醒地址：STA 排空，STD 仍满，Dispatch 必须继续被反压。
       dut.io.intWriteBack(0).wen.poke(true.B)
       dut.io.intWriteBack(0).addr.poke(addrPreg.U)
+      val staPending = Array(false, false)
       for (_ <- 0 until 40) {
-        answerDeq(dut)
+        answerDeq(dut, staPending)
         dut.clock.step()
       }
       dut.io.intWriteBack(0).wen.poke(false.B)
@@ -236,8 +240,9 @@ class AnsSchedulerSpec extends AnyFlatSpec with ChiselScalatestTester with Match
       // 再唤醒 store data：STD 也排空，反压解除。
       dut.io.intWriteBack(0).wen.poke(true.B)
       dut.io.intWriteBack(0).addr.poke(dataPreg.U)
+      val stdPending = Array(false, false)
       for (_ <- 0 until 40) {
-        answerDeq(dut)
+        answerDeq(dut, stdPending)
         dut.clock.step()
       }
       dut.io.intWriteBack(0).wen.poke(false.B)

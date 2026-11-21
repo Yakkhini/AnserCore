@@ -112,7 +112,6 @@ class AnsIssueQueue(
   // 发射选择
   // ------------------------------------------------------------------
   val validVec    = VecInit(entries.io.valid.asBools)
-  val issuedVec   = VecInit(entries.io.issued.asBools)
   val canIssueVec = VecInit(entries.io.canIssue.asBools)
   val fuTypeVec   = entries.io.fuType
   val enqFireVec  = VecInit((0 until numEnq).map(i => io.enq(i).fire))
@@ -221,12 +220,25 @@ class AnsIssueQueue(
   val enqAgeEnq = VecInit((0 until numEnq).map { i =>
     Mux(enqFireVec(i), UIntToOH(i.U, numEnq), 0.U(numEnq.W))
   })
-  for (d <- 0 until numDeq) {
-    val enqCanIssue    = deqCanIssueVec(d)(numEnq - 1, 0)
-    val othersCanIssue = deqCanIssueVec(d)(numEntries - 1, numEnq)
 
-    val enqOldest    = AnsAgeDetector(numEnq, enqAgeEnq, VecInit(Seq(enqCanIssue)))(0)
-    val othersOldest = AnsAgeDetector(numOthers, entries.io.othersEntryEnqSelVec, VecInit(Seq(othersCanIssue)))(0)
+  // 每个条目池只保留一份年龄矩阵：状态更新只依赖入队/转移事件，与出队口无关；
+  // 出队口之间的差异全部由各自的 canIssue 向量表达（其中已包含 portAccepts 的 FU 过滤）。
+  // 共享前提是两个口的候选互斥——由 AnsIssueParams 的 FU 集合互斥 require 保证。
+  // 若将来支持 deqFuSame，第二个口需要像香山 subDeqRequest 一样排除第一个口的选中项。
+  val enqOldestAll = AnsAgeDetector(
+    numEnq,
+    enqAgeEnq,
+    VecInit((0 until numDeq).map(d => deqCanIssueVec(d)(numEnq - 1, 0))),
+  )
+  val othersOldestAll = AnsAgeDetector(
+    numOthers,
+    entries.io.othersEntryEnqSelVec,
+    VecInit((0 until numDeq).map(d => deqCanIssueVec(d)(numEntries - 1, numEnq))),
+  )
+
+  for (d <- 0 until numDeq) {
+    val enqOldest    = enqOldestAll(d)
+    val othersOldest = othersOldestAll(d)
 
     entries.io.enqEntryOldestSel(d)    := enqOldest
     entries.io.othersEntryOldestSel(d) := othersOldest
@@ -330,8 +342,8 @@ class AnsIssueQueue(
       val flush = Wire(new AnsWakeupFlush(params))
       flush.redirect                    := io.flush
       flush.ldCancel                    := io.ldCancel
-      flush.data0Fail                   := io.data0Resp(d).valid && !io.data0Resp(d).bits.ready
-      flush.data1Fail                   := io.data1Resp(d).valid && !io.data1Resp(d).bits.ready
+      flush.data0Fail                   := io.data0Resp(d).valid && IssueRespType.isBlocked(io.data0Resp(d).bits.resp)
+      flush.data1Fail                   := io.data1Resp(d).valid && IssueRespType.isBlocked(io.data1Resp(d).bits.resp)
       wq.io.flush                       := flush
       wq.io.enq.valid                   := deqBeforeDly(d).valid && hasLat
       wq.io.enq.bits.lat                := lat
