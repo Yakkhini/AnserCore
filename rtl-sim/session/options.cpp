@@ -14,34 +14,34 @@ bool OptionSet::takes_value(ValueKind kind) const {
   return kind != ValueKind::Flag;
 }
 
-bool OptionSet::assign(const RegisteredOption& option,
-                       const char* value) const {
+bool OptionSet::assign(const RegisteredOption &option,
+                       const char *value) const {
   switch (option.kind) {
-    case ValueKind::Flag:
-      *static_cast<bool*>(option.context) = true;
-      return true;
-    case ValueKind::Text:
-      *static_cast<std::string*>(option.context) = value;
-      return true;
-    case ValueKind::Number:
-      if (*value == '\0' || *value == '-') {
-        return false;
-      }
-      errno = 0;
-      char* end = nullptr;
-      unsigned long long parsed = std::strtoull(value, &end, 10);
-      if (errno != 0 || end == value || *end != '\0' ||
-          parsed > std::numeric_limits<uint32_t>::max()) {
-        return false;
-      }
-      *static_cast<uint32_t*>(option.context) = static_cast<uint32_t>(parsed);
-      return true;
+  case ValueKind::Flag:
+    *static_cast<bool *>(option.context) = true;
+    return true;
+  case ValueKind::Text:
+    *static_cast<std::string *>(option.context) = value;
+    return true;
+  case ValueKind::Number:
+    if (*value == '\0' || *value == '-') {
+      return false;
+    }
+    errno = 0;
+    char *end = nullptr;
+    unsigned long long parsed = std::strtoull(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0' ||
+        parsed > std::numeric_limits<uint32_t>::max()) {
+      return false;
+    }
+    *static_cast<uint32_t *>(option.context) = static_cast<uint32_t>(parsed);
+    return true;
   }
 
   return false;
 }
 
-void OptionSet::add(const char* name, bool* value, const char* help,
+void OptionSet::add(const char *name, bool *value, const char *help,
                     char short_name) {
   RegisteredOption option;
   option.name = name;
@@ -52,7 +52,7 @@ void OptionSet::add(const char* name, bool* value, const char* help,
   items_.push_back(option);
 }
 
-void OptionSet::add(const char* name, uint32_t* value, const char* help,
+void OptionSet::add(const char *name, uint32_t *value, const char *help,
                     char short_name) {
   RegisteredOption option;
   option.name = name;
@@ -63,7 +63,7 @@ void OptionSet::add(const char* name, uint32_t* value, const char* help,
   items_.push_back(option);
 }
 
-void OptionSet::add(const char* name, std::string* value, const char* help,
+void OptionSet::add(const char *name, std::string *value, const char *help,
                     char short_name) {
   RegisteredOption option;
   option.name = name;
@@ -74,10 +74,10 @@ void OptionSet::add(const char* name, std::string* value, const char* help,
   items_.push_back(option);
 }
 
-void OptionSet::print(const char* argv0) const {
+void OptionSet::print(const char *argv0) const {
   std::printf("Usage: %s [OPTION...]\n", argv0);
   std::printf("  -h, --help                 print all parameters\n");
-  for (const RegisteredOption& option : items_) {
+  for (const RegisteredOption &option : items_) {
     if (option.short_name != 0) {
       std::printf("  -%c, --%s%s\n", option.short_name, option.name.c_str(),
                   takes_value(option.kind) ? "=VAL" : "");
@@ -92,16 +92,16 @@ void OptionSet::print(const char* argv0) const {
   }
 }
 
-ParseStatus OptionSet::parse(int argc, char** argv) {
+ParseStatus OptionSet::parse(int argc, char **argv) {
   // getopt_long permutes argv, so keep the caller's array unchanged.
   std::vector<std::string> owned;
-  std::vector<char*> pointers;
+  std::vector<char *> pointers;
   owned.reserve(static_cast<size_t>(argc));
   pointers.reserve(static_cast<size_t>(argc));
   for (int index = 0; index < argc; ++index) {
     owned.emplace_back(argv[index]);
   }
-  for (std::string& arg : owned) {
+  for (std::string &arg : owned) {
     pointers.push_back(&arg[0]);
   }
 
@@ -109,7 +109,7 @@ ParseStatus OptionSet::parse(int argc, char** argv) {
   std::vector<option> longs;
   longs.push_back(option{"help", no_argument, nullptr, 'h'});
   for (size_t index = 0; index < items_.size(); ++index) {
-    const RegisteredOption& item = items_[index];
+    const RegisteredOption &item = items_[index];
     // Long options without a short name use 1000 + row, above any character
     // code.
     int value =
@@ -131,43 +131,42 @@ ParseStatus OptionSet::parse(int argc, char** argv) {
   while ((value = getopt_long(argc, pointers.data(), short_opts.c_str(),
                               longs.data(), nullptr)) != -1) {
     switch (value) {
-      case 'h':
-        return ParseStatus::Help;
-      case '?':
-        if (optopt != 0) {
-          std::fprintf(stderr, "unknown option: -%c\n", optopt);
-        } else {
-          std::fprintf(stderr, "unknown option: %s\n", pointers[optind - 1]);
-        }
-        return ParseStatus::Error;
-      case ':':
-        if (optopt != 0) {
-          std::fprintf(stderr, "option requires a value: -%c\n", optopt);
-        } else {
-          std::fprintf(stderr, "option requires a value: %s\n",
-                       pointers[optind - 1]);
-        }
-        return ParseStatus::Error;
-      default: {
-        const RegisteredOption* matched;
-        if (value >= 1000) {
-          matched = &items_[static_cast<size_t>(value - 1000)];
-        } else {
-          for (const RegisteredOption& item : items_) {
-            if (item.short_name == value) {
-              matched = &item;
-              break;
-            }
+    case 'h':
+      return ParseStatus::Help;
+    case '?':
+      if (optopt != 0) {
+        std::fprintf(stderr, "unknown option: -%c\n", optopt);
+      } else {
+        std::fprintf(stderr, "unknown option: %s\n", pointers[optind - 1]);
+      }
+      return ParseStatus::Error;
+    case ':':
+      if (optopt != 0) {
+        std::fprintf(stderr, "option requires a value: -%c\n", optopt);
+      } else {
+        std::fprintf(stderr, "option requires a value: %s\n",
+                     pointers[optind - 1]);
+      }
+      return ParseStatus::Error;
+    default: {
+      const RegisteredOption *matched;
+      if (value >= 1000) {
+        matched = &items_[static_cast<size_t>(value - 1000)];
+      } else {
+        for (const RegisteredOption &item : items_) {
+          if (item.short_name == value) {
+            matched = &item;
+            break;
           }
         }
-
-        if (!assign(*matched, optarg)) {
-          std::fprintf(stderr, "invalid value for --%s\n",
-                       matched->name.c_str());
-          return ParseStatus::Error;
-        }
-        break;
       }
+
+      if (!assign(*matched, optarg)) {
+        std::fprintf(stderr, "invalid value for --%s\n", matched->name.c_str());
+        return ParseStatus::Error;
+      }
+      break;
+    }
     }
   }
   return ParseStatus::Ok;

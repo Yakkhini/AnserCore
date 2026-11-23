@@ -1,6 +1,6 @@
 #include "session/session.h"
 
-Session::Session(int argc, char** argv)
+Session::Session(int argc, char **argv)
     : state_(SessionState::kNormal), platform_(create_platform(argc, argv)) {}
 
 void Session::run() {
@@ -18,11 +18,11 @@ void Session::run() {
 void Session::finish() {
   platform_->finish();
   switch (state_) {
-    case SessionState::kError:
-      break;
-    case SessionState::kNormal:
-      break;
-    case SessionState::kRunning:
-      break;
+  case SessionState::kError:
+    break;
+  case SessionState::kNormal:
+    break;
+  case SessionState::kRunning:
+    break;
   }
 }

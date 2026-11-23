@@ -12,14 +12,14 @@ enum class SessionState {
 };
 
 class Session {
- public:
-  explicit Session(int argc, char** argv);
+public:
+  explicit Session(int argc, char **argv);
 
   void run();
   void finish();
   SessionState state() const { return state_; }
 
- private:
+private:
   SessionState state_;
   std::unique_ptr<Platform> platform_;
 };
