@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include "service/lightsss/lightsss.h"
 #include "service/memory/memory.h"
 #include "session/options.h"
 
@@ -14,6 +15,7 @@ struct ServiceModule {
 
 const ServiceModule kModules[] = {
     {register_memory_options, create_memory},
+    {register_lightsss_options, create_lightsss},
 };
 
 } // namespace

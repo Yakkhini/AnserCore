@@ -16,5 +16,8 @@ public:
 
 void register_platform_options(OptionSet &options);
 std::unique_ptr<Platform> create_platform(int argc, char **argv);
+void open_waveform();
+// Rebuild the simulator thread pool after fork().
+void at_clone();
 
 #endif
