@@ -11,7 +11,9 @@ SPDX-License-Identifier = "MulanPSL-2.0"
 
 [[annotations]]
 path = [
+    "rtl-sim/dpi-c/**",
     "rtl-sim/platform/**",
+    "rtl-sim/service/**",
     "rtl-sim/session/**",
 ]
 SPDX-FileCopyrightText = "2026 ECOS Team <ecos-all@ict.ac.cn>"
