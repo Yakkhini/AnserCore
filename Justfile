@@ -27,15 +27,32 @@ SIM_ARGS := ""
 # simple or dramsim3. dramsim3 defines EMU_DRAMSIM3.
 DRAM_BACKEND := env_var_or_default("DRAM_BACKEND", "simple")
 
-# Clone OpenXiangShan/DRAMsim3 and build the static library.
+# Initialize a West workspace in this checkout and sync only the requested project.
+_west-update project:
+    #!/usr/bin/env zsh
+    set -euo pipefail
+    cd "$PRJ_ROOT"
+    mkdir -p out
+    touch out/west.lock
+    zmodload zsh/system
+    zsystem flock -f lock_fd out/west.lock
+    if [[ ! -f .west/config ]]; then
+        west init -l deps
+    fi
+    west update --narrow --fetch-opt=--depth=1 {{ quote(project) }}
+
+# Build the West-managed timing model or an existing DRAMSIM3_HOME checkout.
 dramsim3:
     #!/usr/bin/env zsh
     set -euo pipefail
     dram_dir={{ quote(DRAMSIM3_HOME) }}
-    if [[ ! -f $dram_dir/src/cosimulation.h ]]; then
-        mkdir -p "$(dirname "$dram_dir")"
-        git clone --depth 1 --branch co-simulation \
-            https://github.com/OpenXiangShan/DRAMsim3.git "$dram_dir"
+    managed="$PRJ_ROOT/third_party/DRAMsim3"
+    if [[ "${dram_dir:A}" == "${managed:A}" || ! -f "$dram_dir/src/cosimulation.h" ]]; then
+        just --justfile "$PRJ_ROOT/Justfile" _west-update dramsim3
+        if [[ "${dram_dir:A}" != "${managed:A}" ]]; then
+            git clone --no-hardlinks "$managed" "$dram_dir"
+            git -C "$dram_dir" remote set-url origin "$(west list dramsim3 -f '{url}')"
+        fi
     fi
     cmake -S "$dram_dir" -B "$dram_dir/build" -DCOSIM=ON -DCMAKE_BUILD_TYPE=Release
     cmake --build "$dram_dir/build" --target dramsim3 -j "$NIX_BUILD_CORES"

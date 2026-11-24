@@ -17,4 +17,5 @@ docs/html
 
 compile_commands.json
 
+.west/
 third_party/

@@ -1,0 +1,6 @@
+manifest:
+  projects:
+    - name: dramsim3
+      url: https://github.com/OpenXiangShan/DRAMsim3
+      revision: f02131a4ad36f6430bb23e7b0795da79f981be69
+      path: third_party/DRAMsim3

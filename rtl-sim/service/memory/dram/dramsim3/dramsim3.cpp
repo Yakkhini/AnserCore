@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
+ *
+ * SPDX-License-Identifier: MulanPSL-2.0
+ */
+
 #ifdef EMU_DRAMSIM3
 
 #include <sys/stat.h>
