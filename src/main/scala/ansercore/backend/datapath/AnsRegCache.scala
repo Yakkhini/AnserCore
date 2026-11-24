@@ -3,7 +3,7 @@
  * 本版先提供完整的读写口与时序骨架，数据写入使用每个写口的轮转替换索引；
  * IQ 侧暂时关闭 useRegCache，读请求不会真正发出（保留端口便于后续打开）。
  */
-package ansercore.backend.issue
+package ansercore.backend.datapath
 
 import chisel3._
 import chisel3.util._

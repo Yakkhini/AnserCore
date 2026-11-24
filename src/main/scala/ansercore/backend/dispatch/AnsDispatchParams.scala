@@ -58,11 +58,11 @@ object AnsDispatchParams {
 
   // 全局 EXU 编号；以 AnsIssueParams 为唯一来源。
   val exuALU0: Int = AnsIssueParams.exuIdxOf("ALU0")
-  val exuBJU0: Int = AnsIssueParams.exuIdxOf("BJU0")
+  val exuMUL0: Int = AnsIssueParams.exuIdxOf("MUL0")
   val exuALU1: Int = AnsIssueParams.exuIdxOf("ALU1")
-  val exuBJU1: Int = AnsIssueParams.exuIdxOf("BJU1")
+  val exuMUL1: Int = AnsIssueParams.exuIdxOf("MUL1")
   val exuALU2: Int = AnsIssueParams.exuIdxOf("ALU2")
-  val exuCSR0: Int = AnsIssueParams.exuIdxOf("CSR0")
+  val exuBJU0: Int = AnsIssueParams.exuIdxOf("BJU0")
   val exuFEX0: Int = AnsIssueParams.exuIdxOf("FEX0")
   val exuFEX1: Int = AnsIssueParams.exuIdxOf("FEX1")
   val exuFEX2: Int = AnsIssueParams.exuIdxOf("FEX2")
@@ -96,17 +96,18 @@ object AnsDispatchParams {
   /** fuType 可落到多个出队口时，按出队口负载做均衡。 */
   val multiIQGroups: Seq[AnsIQGroup] = Seq(
     AnsIQGroup(Seq(FuType.alu), Seq(exuALU0, exuALU1, exuALU2)),
-    AnsIQGroup(Seq(FuType.brh, FuType.jmp), Seq(exuBJU0, exuBJU1, exuCSR0)),
-    AnsIQGroup(Seq(FuType.mul, FuType.bku), Seq(exuALU0, exuALU1)),
+    AnsIQGroup(Seq(FuType.mul, FuType.bku), Seq(exuMUL0, exuMUL1)),
     AnsIQGroup(Seq(FuType.falu, FuType.fmac), Seq(exuFEX0, exuFEX2)),
     AnsIQGroup(Seq(FuType.ldu), Seq(exuLDU0, exuLDU1)),
   )
 
   /** 仅有一个合法出队口的 fuType。 */
   val singleIQ: Seq[(Int, Int)] = Seq(
-    FuType.div   -> exuCSR0,
-    FuType.csr   -> exuCSR0,
-    FuType.fence -> exuCSR0,
+    FuType.brh   -> exuBJU0,
+    FuType.jmp   -> exuBJU0,
+    FuType.div   -> exuMUL0,
+    FuType.csr   -> exuMUL0,
+    FuType.fence -> exuMUL0,
     FuType.fcvt  -> exuFEX0,
     FuType.fdiv  -> exuFEX1,
     FuType.stu   -> exuSTA0,

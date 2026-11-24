@@ -8,7 +8,7 @@
  *
  * 与香山 NewDispatch 的差异：
  *   - 标量 RVB23，无向量/向量 LSQ；STD0 不占 Dispatch 入队口；
- *   - BusyTable 不维护 loadDependency；singleStep/ldCancel 只保留端口；
+ *   - BusyTable 保存 loadDependency 并响应 ldCancel；singleStep 只保留端口；
  *   - IQ 负载均衡平局按设计文档取较小索引（香山因比较矩阵写法取较大索引）。
  */
 package ansercore.backend.dispatch
@@ -101,11 +101,13 @@ class AnsDispatch(val params: BundleParams = BundleParams()) extends Module {
 
   intBusyTable.io.wbPregs    := io.wbPregsInt
   intBusyTable.io.allocPregs := allocInt
+  intBusyTable.io.ldCancel   := io.ldCancel
   intBusyTable.io.cancel     := io.data0CancelToDispatch
   intBusyTable.io.wakeUp     := VecInit(io.wakeUpAll.wakeUpInt ++ io.wakeUpAll.wakeUpMem)
 
   fpBusyTable.io.wbPregs    := io.wbPregsFp
   fpBusyTable.io.allocPregs := allocFp
+  fpBusyTable.io.ldCancel   := io.ldCancel
   fpBusyTable.io.cancel     := io.data0CancelToDispatch
   fpBusyTable.io.wakeUp     := VecInit(io.wakeUpAll.wakeUpFp ++ io.wakeUpAll.wakeUpMem)
 
@@ -120,12 +122,16 @@ class AnsDispatch(val params: BundleParams = BundleParams()) extends Module {
     )
   )
   rcTagTable.io.allocPregs := allocInt
-  rcTagTable.io.cancel := io.data0CancelToDispatch
+  rcTagTable.io.ldCancel := io.ldCancel
+  rcTagTable.io.wbPregs  := io.wbPregsInt
+  rcTagTable.io.cancel   := io.data0CancelToDispatch
   for ((port, k) <- rcTagTable.io.write.zipWithIndex) {
     val wake = (io.wakeUpAll.wakeUpInt ++ io.wakeUpAll.wakeUpMem)(k)
-    port.wen  := wake.valid && wake.bits.rfWen
-    port.addr := wake.bits.rcDest
-    port.tag  := wake.bits.pdest
+    port.wen            := wake.valid && wake.bits.rfWen
+    port.addr           := wake.bits.rcDest
+    port.tag            := wake.bits.pdest
+    port.is0Lat         := wake.bits.is0Lat
+    port.loadDependency := wake.bits.loadDependency
   }
 
   // ---- 组装进入 IQ/ROB/LSQ 的 uop ----
@@ -154,6 +160,18 @@ class AnsDispatch(val params: BundleParams = BundleParams()) extends Module {
         Mux(SrcType.isFloating(uop.srcType(j)), fpReady, true.B),
       )
       fromRenameUpdate(i).bits.srcState(j) := Mux(ready, SourceState.ready.U, SourceState.waiting.U)
+
+      val intDep =
+        if (j < numIntSrc) intBusyTable.io.read(i * numIntSrc + j).loadDependency
+        else 0.U.asTypeOf(uop.srcLoadDependency(j))
+      val fpDep  =
+        if (j < numFpSrc) fpBusyTable.io.read(i * numFpSrc + j).loadDependency
+        else 0.U.asTypeOf(uop.srcLoadDependency(j))
+      fromRenameUpdate(i).bits.srcLoadDependency(j) := Mux(
+        SrcType.isInteger(uop.srcType(j)),
+        intDep,
+        Mux(SrcType.isFloating(uop.srcType(j)), fpDep, 0.U.asTypeOf(intDep)),
+      )
 
       if (j < numIntSrc) {
         val rcPort = rcTagTable.io.read(i * numIntSrc + j)

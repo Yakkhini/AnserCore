@@ -74,16 +74,6 @@ object Bundles {
     intRegCacheEntries:  Int = 16,
     /** Memory RegCache entries / 访存寄存器缓存条目数. */
     memRegCacheEntries:  Int = 12,
-    /** IQ 唤醒广播是否在 Backend 合流后打一拍.
-      *
-      * true（当前默认）：切断 "IQ 选择 -> 唤醒队列 -> 全后端合流 -> 所有 IQ 的源状态比较"
-      * 这条组合路径，代价是 0-lat 依赖链多一拍。
-      *
-      * false（预留）：香山式组合广播。启用前必须同步把 `AnsEntry` 的唤醒命中数据源从
-      * bypass2 改为 bypass1，并补齐 0-lat 取消回滚；否则会读到错误的旁路周期。
-      * 详见 markdown/IssueQueue 设计文档 §5.5。
-      */
-    registerWakeupBroadcast: Boolean = true,
   ) {
     require(xlen > 0, "xlen must be positive")
     require(pcWidth > 0, "pcWidth must be positive")
@@ -245,14 +235,14 @@ object Bundles {
    * scalar backend reference so the IQ and DataPath agree on decay order.
    */
   object DataSource {
-    val width        = 4
-    val zero         = 0
-    /** 组合 forward：直接使用 EXU 当拍输出。
-      * 当前 IQ 唤醒广播打一拍，DataPath 的 forward 通路恒为 0（见 AnsDataPath 的 fwd），
-      * 该编码只为将来 0-lat 同拍发射预留，与香山保持一致。 */
+    val width = 4
+    val zero  = 0
+
+    /** 组合 forward：直接使用生产者 EXU 当拍输出。 BypassNetwork 与 EXU 之间有一级 `AnsExuInputPipe` 输入寄存，组合 forward 不会成环； IQ
+      * 唤醒命中当拍发射时使用该档位。
+      */
     val forward      = 1
     val bypass       = 2
-    val bypass2      = 3
     val immediate    = 4
     val regCache     = 6
     val registerFile = 8
@@ -267,7 +257,6 @@ object Bundles {
     def readRegCache(source: UInt): Bool = source === regCache.U
     def readForward(source:  UInt): Bool = source === forward.U
     def readBypass(source:   UInt): Bool = source === bypass.U
-    def readBypass2(source:  UInt): Bool = source === bypass2.U
     def readImm(source:      UInt): Bool = source === immediate.U
     def readZero(source:     UInt): Bool = source === zero.U
   }
@@ -1289,9 +1278,9 @@ object Bundles {
 
   /** Per-stage issue response encoding / 每个流水级的响应编码.
     *
-    *   - `block`     : 这一级没有通过，条目必须清 issued 并重新发射；
+    *   - `block` : 这一级没有通过，条目必须清 issued 并重新发射；
     *   - `uncertain` : 这一级通过了，但最终结果还要等后续阶段（访存/向量反馈），条目既不清理也不重发；
-    *   - `success`   : 最终完成，条目可以清除。
+    *   - `success` : 最终完成，条目可以清除。
     *
     * 编码与香山的 RespType 一致。当前 AnserCore 只产生 block/success，uncertain 为预留语义。
     */
@@ -1308,9 +1297,8 @@ object Bundles {
 
   /** One issue-queue entry response / 一个发射队列条目的响应.
     *
-    * `resp = block` 表示这一级没有通过，指令需要重发；`success` 表示可以清除条目；
-    * `uncertain` 表示这一级通过但还不是最终完成（当前未产生，留给访存/向量反馈）。
-    * `fuType` 回送以便忙表释放正确的延迟槽。
+    * `resp = block` 表示这一级没有通过，指令需要重发；`success` 表示可以清除条目； `uncertain` 表示这一级通过但还不是最终完成（当前未产生，留给访存/向量反馈）。 `fuType`
+    * 回送以便忙表释放正确的延迟槽。
     */
   class IssueEntryResponse(val params: BundleParams = BundleParams()) extends Bundle {
     val robIdx = UInt(params.robIndexWidth.W)
@@ -1503,6 +1491,7 @@ object Bundles {
     )
     val pdest           = UInt(params.physicalRegWidth.W)
     val robIdx          = UInt(params.robIndexWidth.W)
+    val fuType          = FuType()
     val intWen          = Bool()
     val fpWen           = Bool()
     val redirect        = Valid(new Redirect(params))

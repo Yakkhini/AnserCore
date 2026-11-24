@@ -102,6 +102,7 @@ class DispatchSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
     w.pdest.poke(0.U)
     w.rcDest.poke(0.U)
     w.is0Lat.poke(false.B)
+    w.loadDependency.foreach(_.poke(0.U))
   }
 
   private def resetDispatch(dut: AnsDispatch): Unit = {
@@ -226,6 +227,19 @@ class DispatchSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
     }
   }
 
+  it should "route CSR and FENCE through the shared MUL0 issue owner" in {
+    test(new AnsDispatch(params)) { dut =>
+      for (fu <- Seq(FuType.csr, FuType.fence)) {
+        resetDispatch(dut)
+        selectIQs(dut, Seq(fu))
+        driveUop(dut, 0, fu, pdest = 11, intWen = fu == FuType.csr)
+        val port = dut.io.toIssueQueues(enqPort(AnsDispatchParams.intIQ0))
+        port.valid.expect(true.B); port.bits.fuType.expect(fu.U)
+        dut.io.toIssueQueues(enqPort(AnsDispatchParams.intIQ1)).valid.expect(false.B)
+      }
+    }
+  }
+
   it should "send div/fcvt/ldu/stu to their fixed or balanced queues" in {
     test(new AnsDispatch(params)) { dut =>
       resetDispatch(dut)
@@ -239,8 +253,9 @@ class DispatchSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
       driveUop(dut, 2, FuType.ldu, pdest  = 13)
       driveUop(dut, 3, FuType.stu, pdest  = 14, intWen = false)
 
-      dut.io.toIssueQueues(enqPort(AnsDispatchParams.intIQ2)).valid.expect(true.B)
-      dut.io.toIssueQueues(enqPort(AnsDispatchParams.intIQ2)).bits.pdest.expect(11.U)
+      // DIV 现在路由到 MUL0（Int-IQ0）。
+      dut.io.toIssueQueues(enqPort(AnsDispatchParams.intIQ0)).valid.expect(true.B)
+      dut.io.toIssueQueues(enqPort(AnsDispatchParams.intIQ0)).bits.pdest.expect(11.U)
       dut.io.toIssueQueues(enqPort(AnsDispatchParams.fpIQ0)).valid.expect(true.B)
       dut.io.toIssueQueues(enqPort(AnsDispatchParams.fpIQ0)).bits.pdest.expect(12.U)
       dut.io.toIssueQueues(enqPort(AnsDispatchParams.ldu0)).valid.expect(true.B)
@@ -438,6 +453,59 @@ class DispatchSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
       dut.io.debug.lsqCanAccept.expect(false.B)
       dut.clock.step()
       dut.io.debug.lsqCanAccept.expect(true.B)
+    }
+  }
+
+  it should "carry integer and floating dependency ages into dispatched uops and revoke cancelled ready" in {
+    test(new AnsDispatch(params)) { dut =>
+      for (floating <- Seq(false, true)) {
+        resetDispatch(dut)
+        val fu  = if (floating) FuType.falu else FuType.alu
+        val st  = if (floating) SrcType.floating else SrcType.integer
+        selectIQs(dut, Seq(fu))
+        driveUop(dut, 0, fu, pdest = 9, intWen = !floating, fpWen = floating)
+        dut.clock.step(); dut.io.fromRename(0).valid.poke(false.B)
+        val w   = if (floating) dut.io.wakeUpAll.wakeUpFp(0) else dut.io.wakeUpAll.wakeUpInt(0)
+        w.valid.poke(true.B); w.bits.rfWen.poke((!floating).B); w.bits.fpWen.poke(floating.B)
+        w.bits.pdest.poke(9.U); w.bits.loadDependency(0).poke(1.U)
+        // Selection of the next dispatch group overlaps the wakeup, preserving dependency age.
+        selectIQs(dut, Seq(fu)); w.valid.poke(false.B)
+        driveUop(
+          dut,
+          0,
+          fu,
+          pdest                    = 10,
+          psrc                     = Seq(9, 0, 0),
+          srcType                  = Seq(st, SrcType.immediate, SrcType.none),
+          intWen                   = !floating,
+          fpWen                    = floating,
+        )
+        val out = dut.io.toIssueQueues(enqPort(if (floating) AnsDispatchParams.fpIQ0 else AnsDispatchParams.intIQ0))
+        out.valid.expect(true.B)
+        out.bits.srcState(0).expect(SourceState.ready.U)
+        out.bits.srcLoadDependency(0)(0).expect(2.U)
+        out.bits.srcLoadDependency(1)(0).expect(0.U)
+        dut.io.ldCancel(0).second.poke(true.B)
+        out.bits.srcState(0).expect(SourceState.waiting.U)
+        if (!floating) out.bits.useRegCache(0).expect(false.B)
+        dut.clock.step(); dut.io.fromRename(0).valid.poke(false.B)
+        dut.io.ldCancel(0).second.poke(false.B)
+        val wb  = if (floating) dut.io.wbPregsFp(0) else dut.io.wbPregsInt(0)
+        wb.valid.poke(true.B); wb.bits.poke(9.U)
+        selectIQs(dut, Seq(fu)); wb.valid.poke(false.B)
+        driveUop(
+          dut,
+          0,
+          fu,
+          pdest                    = 11,
+          psrc                     = Seq(9, 0, 0),
+          srcType                  = Seq(st, SrcType.immediate, SrcType.none),
+          intWen                   = !floating,
+          fpWen                    = floating,
+        )
+        out.bits.srcState(0).expect(SourceState.ready.U)
+        out.bits.srcLoadDependency(0)(0).expect(0.U)
+      }
     }
   }
 }

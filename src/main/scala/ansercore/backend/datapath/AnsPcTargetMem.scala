@@ -1,9 +1,9 @@
 /* 后端 PC / target 本地镜像。
  *
  * 由前端 FTQ 的写请求复制更新，DataPath 在 data0 发出查询、data1 使用结果。
- * 读 PC 用 ftqPtr + ftqOffset；读预测目标用 ftqPtr+1 的 startAddr。
+ * 读 PC 用当前 FTQ 项的起始 PC + ftqOffset；预测目标读取同一项保存的 target。
  */
-package ansercore.backend.issue
+package ansercore.backend.datapath
 
 import chisel3._
 import chisel3.util._
@@ -37,9 +37,8 @@ class AnsPcTargetMem(
 
   io.read.foreach { r =>
     val pcAddr  = r.ftqPtr.value
-    val nextPtr = r.ftqPtr.value + 1.U
     val pcData  = RegEnable(pcMem(pcAddr) + (r.ftqOffset << 1), r.valid)
-    val tgtData = RegEnable(targetMem(nextPtr), r.valid)
+    val tgtData = RegEnable(targetMem(pcAddr), r.valid)
     r.pc     := pcData
     r.target := tgtData
   }

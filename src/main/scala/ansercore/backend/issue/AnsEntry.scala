@@ -1,7 +1,7 @@
 /* 发射队列条目。
  *
  * 雁栖湖只有 EnqEntry 和 ComplexEntry 两类，二者使用同一套实现，区别仅在于：
- *   - EnqEntry 直接接收 Dispatch 的指令，并带 1~2 拍延迟唤醒补查；
+ *   - EnqEntry 直接接收 Dispatch 的指令，并带入队后一拍的唤醒补查；
  *   - ComplexEntry 由 EnqEntry 整条转移（不经过 SimpleEntry）。
  * 所有条目都支持 IQ 推测唤醒和同拍 fast-forward 的数据源衰减。
  */
@@ -26,15 +26,14 @@ class AnsEntryIO(
   val wakeUpFromWB = Vec(iq.wbWakeUpCount, Flipped(Valid(new AnsWbWakeUp(params))))
   val wakeUpFromIQ = Vec(iq.wakeupSourceExuIdx.size, Flipped(Valid(new AnsIqWakeUp(params))))
   val data0Cancel  = Input(Vec(AnsIssueParams.nExu, Bool()))
+  val data1Cancel  = Input(Vec(AnsIssueParams.nExu, Bool()))
   val ldCancel     = Vec(params.loadPipelineWidth, Flipped(new LoadCancel))
 
-  // 入队延迟补查（相对当前周期已打 1/2 拍）
+  // 入队第一拍补查：唤醒和取消都来自前一拍
   val enqWakeUpWB1    = Vec(iq.wbWakeUpCount, Flipped(Valid(new AnsWbWakeUp(params))))
   val enqWakeUpIQ1    = Vec(iq.wakeupSourceExuIdx.size, Flipped(Valid(new AnsIqWakeUp(params))))
-  val enqWakeUpWB2    = Vec(iq.wbWakeUpCount, Flipped(Valid(new AnsWbWakeUp(params))))
-  val enqWakeUpIQ2    = Vec(iq.wakeupSourceExuIdx.size, Flipped(Valid(new AnsIqWakeUp(params))))
+  val enqLdCancel1    = Input(Vec(params.loadPipelineWidth, new LoadCancel))
   val enqData0Cancel1 = Input(Vec(AnsIssueParams.nExu, Bool()))
-  val enqData0Cancel2 = Input(Vec(AnsIssueParams.nExu, Bool()))
 
   val data0Resp = Vec(iq.numDeq, Flipped(Valid(new IssueEntryResponse(params))))
   val data1Resp = Vec(iq.numDeq, Flipped(Valid(new IssueEntryResponse(params))))
@@ -60,25 +59,13 @@ class AnsEntryIO(
   val deqPortIdxRead = Output(UInt(log2Ceil(2).W))
 }
 
-object AnsEntry {
-
-  /** Elaborating one candidate keeps its hit, data path and producer metadata together. */
-  final case class WakeupCandidate(
-    hit:        Bool,
-    dataSource: UInt,
-    dependency: Vec[UInt],
-    exuSource:  UInt,
-  )
-
-  /** 本拍 IQ 唤醒命中后该源采用的数据源档位。
-    *
-    * 与 AnsBackend 的 `registerWakeupBroadcast` 绑定：唤醒在 Backend 合流后打一拍才到达，
-    * 消费者进入 data1 时生产者的结果正好落在 bypass2。
-    * 若将来关闭 `registerWakeupBroadcast`（香山式组合广播），这里必须同步改成
-    * `DataSource.bypass`，并按设计文档 §5.5 补齐 DataPath forward 与取消回滚。
-    */
-  val iqWakeupHitDataSource: Int = DataSource.bypass2
-
+/** 组合命中：原始 IQ 命中用于选择，过滤后的命中用于更新状态。 */
+class AnsSrcWakeupInfo(val params: BundleParams) extends Bundle {
+  val iqRaw      = Bool()
+  val iqValid    = Bool()
+  val wb         = Bool()
+  val dependency = Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W))
+  val exuSource  = UInt(log2Ceil(params.maxExuCount + 1).W)
 }
 
 class AnsEntry(
@@ -86,69 +73,69 @@ class AnsEntry(
   val iq:     AnsIssueQueueParams,
   val isEnq:  Boolean,
 ) extends Module {
-  import AnsEntry.WakeupCandidate
-
   iq.validate(params)
-  val io = IO(new AnsEntryIO(params, iq, isEnq))
+  val io         = IO(new AnsEntryIO(params, iq, isEnq))
+  val validReg   = RegInit(false.B)
+  val entryReg   = Reg(new AnsEntryBundle(params, iq))
+  val enqFire    = io.enq.valid && io.enqReady
+  val firstCycle = RegNext(enqFire, false.B)
+  val status     = entryReg.status
+  val flushed    = AnsIssueUtils.needFlush(status.robIdx, io.flush)
 
-  val validReg    = RegInit(false.B)
-  val entryReg    = Reg(new AnsEntryBundle(params, iq))
-  val enqDelayCnt = RegInit(0.U(2.W))
-
-  val status = entryReg.status
-
-  val enqFire = io.enq.valid && io.enqReady
-  val flushed = AnsIssueUtils.needFlush(status.robIdx, io.flush)
-
-  // 入队当拍/前一拍可能已经发出唤醒，EnqEntry 用延迟副本补查。
-  val enqDelayActive = isEnq.B && enqDelayCnt =/= 0.U
-  when(enqFire) {
-    enqDelayCnt := 2.U
-  }.elsewhen(enqDelayCnt =/= 0.U) {
-    enqDelayCnt := enqDelayCnt - 1.U
-  }
-
+  def shift(dep:      Vec[UInt]): Vec[UInt]                                     = AnsIssueUtils.shiftLoadDependency(dep)
+  def any(xs:         Seq[Bool]): Bool                                          = xs.foldLeft(false.B)(_ || _)
+  def zeroSource(src: AnsSrcStatus): Bool                                       = SrcType.isInteger(src.srcType) && src.psrc === 0.U
   def srcMatch(src: AnsSrcStatus, pdest: UInt, intWen: Bool, fpWen: Bool): Bool =
-    pdest === src.psrc &&
+    !zeroSource(src) && pdest === src.psrc &&
       ((SrcType.isInteger(src.srcType) && intWen) || (SrcType.isFloating(src.srcType) && fpWen))
 
-  def iqCandidates(
-    src:        AnsSrcStatus,
-    wakeups:    Vec[Valid[AnsIqWakeUp]],
-    cancel:     Vec[Bool],
-    enabled:    Bool,
-    dataSource: Int,
-  ): Seq[WakeupCandidate] = wakeups.zip(iq.wakeupSourceExuIdx).map { case (w, exuIdx) =>
-    // 0-lat 唤醒(推测唤醒)在生产者的 data0 结果出来之前就已广播，因此必须允许撤销：
-    // 当前广播在 Backend 打了一拍，生产者的 data0Cancel 与本拍唤醒同拍到达，用
-    // `!cancelled` 挡掉即可，不需要回滚已经置 ready 的源。
-    // TODO(0-lat 同拍发射): 若改为组合广播或 entry 级 canIssueBypass，取消会晚于源被
-    //   置 ready 一拍，必须增加“已发射回滚/重发”路径（参考香山
-    //   srcWakeupByIQButCancel / cancelBypass）。详见设计文档 §5.5。
-    val cancelled = (cancel(exuIdx) && w.bits.is0Lat) ||
-      AnsIssueUtils.isLoadCancelled(w.bits.loadDependency, io.ldCancel)
-    WakeupCandidate(
-      enabled && w.valid && srcMatch(src, w.bits.pdest, w.bits.intWen, w.bits.fpWen) && !cancelled,
-      dataSource.U(DataSource.width.W),
-      w.bits.loadDependency,
-      (exuIdx + 1).U(log2Ceil(params.maxExuCount + 1).W),
-    )
+  def wakeupInfo(
+    src:    AnsSrcStatus,
+    ws:     Vec[Valid[AnsIqWakeUp]],
+    wb:     Vec[Valid[AnsWbWakeUp]],
+    cancel: Vec[Bool],
+    ld:     Vec[LoadCancel],
+  ): AnsSrcWakeupInfo = {
+    val result = WireInit(0.U.asTypeOf(new AnsSrcWakeupInfo(params)))
+    val raw    = ws.map(w => w.valid && srcMatch(src, w.bits.pdest, w.bits.intWen, w.bits.fpWen))
+    if (raw.nonEmpty) {
+      val effective = raw.zip(ws).zip(iq.wakeupSourceExuIdx).map { case ((hit, w), e) =>
+        hit && !(cancel(e) && w.bits.is0Lat) && !LoadShouldCancel(w.bits.loadDependency, ld)
+      }
+      val validHit  = any(effective)
+      val winner    = PriorityEncoderOH(Mux(validHit, VecInit(effective).asUInt, VecInit(raw).asUInt))
+      val w         = Mux1H(winner, ws.map(_.bits))
+      result.iqRaw      := any(raw)
+      result.iqValid    := validHit
+      result.dependency := w.loadDependency
+      result.exuSource  := Mux1H(winner, iq.wakeupSourceExuIdx.map(e => (e + 1).U))
+    }
+    result.wb := any(wb.map(w => w.valid && srcMatch(src, w.bits.pdest, w.bits.intWen, w.bits.fpWen)))
+    result
   }
 
-  def wbCandidates(
-    src:     AnsSrcStatus,
-    wakeups: Vec[Valid[AnsWbWakeUp]],
-    enabled: Bool,
-  ): Seq[WakeupCandidate] = wakeups.map { w =>
-    WakeupCandidate(
-      enabled && w.valid && srcMatch(src, w.bits.pdest, w.bits.intWen, w.bits.fpWen),
-      DataSource.registerFile.U(DataSource.width.W),
-      0.U.asTypeOf(Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W))),
-      0.U(log2Ceil(params.maxExuCount + 1).W),
-    )
+  // 历史补查先形成当前状态；只对入队后的第一拍有效。
+  val currentStatus = WireInit(status)
+  for (s <- 0 until params.numSrc) {
+    val src     = status.srcStatus(s)
+    val hist    = wakeupInfo(src, io.enqWakeUpIQ1, io.enqWakeUpWB1, io.enqData0Cancel1, io.enqLdCancel1)
+    val histDep = shift(hist.dependency)
+    when(isEnq.B && firstCycle) {
+      when(hist.wb) {
+        currentStatus.srcStatus(s).srcState          := SourceState.ready.U
+        currentStatus.srcStatus(s).dataSources       := DataSource.registerFile.U
+        currentStatus.srcStatus(s).exuSources        := 0.U
+        currentStatus.srcStatus(s).srcLoadDependency := 0.U.asTypeOf(histDep)
+      }.elsewhen(hist.iqValid && !LoadShouldCancel(histDep, io.ldCancel)) {
+        currentStatus.srcStatus(s).srcState          := SourceState.ready.U
+        currentStatus.srcStatus(s).dataSources       := DataSource.bypass.U
+        currentStatus.srcStatus(s).exuSources        := hist.exuSource
+        currentStatus.srcStatus(s).srcLoadDependency := histDep
+      }
+    }
   }
 
-  val selResp = WireDefault(0.U.asTypeOf(Valid(new IssueEntryResponse(params))))
+  val selResp      = WireDefault(0.U.asTypeOf(Valid(new IssueEntryResponse(params))))
   when(validReg && status.issued) {
     when(status.issueTimer === AnsIssueTimer.data0.U) {
       selResp := (if (iq.numDeq == 1) io.data0Resp(0) else io.data0Resp(status.deqPortIdx))
@@ -156,146 +143,97 @@ class AnsEntry(
       selResp := (if (iq.numDeq == 1) io.data1Resp(0) else io.data1Resp(status.deqPortIdx))
     }
   }
-
-  val respSuccess = selResp.valid && IssueRespType.isSuccess(selResp.bits.resp)
-  val respBlock   = selResp.valid && IssueRespType.isBlocked(selResp.bits.resp)
-  // uncertain：既不清除也不重发，timer 自然推进到下一阶段
-
-  // 入队延迟补查后的当前状态
-  val currentStatus = WireInit(entryReg.status)
-  val srcStateNext  = Wire(Vec(params.numSrc, SourceState()))
-  val dataSrcNext   = Wire(Vec(params.numSrc, DataSource()))
-  val depNext       = Wire(Vec(params.numSrc, Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W))))
-  val exuSrcNext    = Wire(Vec(params.numSrc, UInt(log2Ceil(params.maxExuCount + 1).W)))
-
-  val srcLoadCancel = Wire(Vec(params.numSrc, Bool()))
-  val anyLoadCancel = srcLoadCancel.asUInt.orR
+  val respSuccess  = selResp.valid && IssueRespType.isSuccess(selResp.bits.resp)
+  val respBlock    = selResp.valid && IssueRespType.isBlocked(selResp.bits.resp)
+  val entryUpdate  = WireInit(entryReg)
+  val issueStatus  = WireInit(currentStatus)
+  val sourceReady  = Wire(Vec(params.numSrc, Bool()))
+  val cancelSource = Wire(Vec(params.numSrc, Bool()))
 
   for (s <- 0 until params.numSrc) {
-    val src   = entryReg.status.srcStatus(s)
-    val iqNow = iqCandidates(src, io.wakeUpFromIQ, io.data0Cancel, true.B, AnsEntry.iqWakeupHitDataSource)
-    val iqD1  = iqCandidates(src, io.enqWakeUpIQ1, io.enqData0Cancel1, enqDelayActive, DataSource.registerFile)
-    val iqD2  = iqCandidates(src, io.enqWakeUpIQ2, io.enqData0Cancel2, enqDelayActive, DataSource.registerFile)
-    val wbNow = wbCandidates(src, io.wakeUpFromWB, true.B)
-    val wbD1  = wbCandidates(src, io.enqWakeUpWB1, enqDelayActive)
-    val wbD2  = wbCandidates(src, io.enqWakeUpWB2, enqDelayActive)
+    val src           = currentStatus.srcStatus(s)
+    val next          = entryUpdate.status.srcStatus(s)
+    val out           = issueStatus.srcStatus(s)
+    val wake          = wakeupInfo(src, io.wakeUpFromIQ, io.wakeUpFromWB, io.data0Cancel, io.ldCancel)
+    val inherentReady = !SrcType.isRegister(src.srcType) || zeroSource(src)
+    val oldLoadCancel = LoadShouldCancel(src.srcLoadDependency, io.ldCancel)
+    val issueDep      = Mux(wake.iqRaw, wake.dependency, src.srcLoadDependency)
+    cancelSource(s) := !inherentReady && LoadShouldCancel(issueDep, io.ldCancel)
+    sourceReady(s)  := inherentReady || SourceState.isReady(src.srcState) || wake.iqRaw
 
-    // 当前 IQ 优先以保留 bypass2；否则确认写回优先于延迟 IQ，清除推测依赖。
-    // 同组按输入端口顺序选择；延迟 IQ 按较新的一拍副本优先。
-    val candidates = iqNow ++ wbNow ++ wbD1 ++ wbD2 ++ iqD1 ++ iqD2
-    val hits       = VecInit(candidates.map(_.hit))
-    val hitAny     = hits.asUInt.orR
-    val winnerOH   = PriorityEncoderOH(hits.asUInt)
-    val delayedHit = (iqD1 ++ iqD2 ++ wbD1 ++ wbD2).map(_.hit).foldLeft(false.B)(_ || _)
+    // 当拍原始命中保留 forward 的生产者身份；0-lat 失败由消费者 data0 拦截。
+    out.dataSources       := Mux(wake.iqRaw, DataSource.forward.U, src.dataSources)
+    out.exuSources        := Mux(wake.iqRaw, wake.exuSource, src.exuSources)
+    out.srcLoadDependency := Mux(inherentReady, 0.U.asTypeOf(issueDep), shift(issueDep))
 
-    val ldCanc = AnsIssueUtils.isLoadCancelled(src.srcLoadDependency, io.ldCancel)
-    srcLoadCancel(s) := ldCanc
-    srcStateNext(s)  := Mux(
-      !SrcType.isRegister(src.srcType) || !validReg || hitAny,
-      SourceState.ready.U(SourceState.width.W),
-      Mux(ldCanc, SourceState.waiting.U(SourceState.width.W), src.srcState),
+    next                   := src
+    next.useRegCache       := false.B
+    next.srcState          := Mux(
+      inherentReady || wake.wb || wake.iqValid,
+      SourceState.ready.U,
+      Mux(oldLoadCancel, SourceState.waiting.U, src.srcState),
     )
-
-    // Backend 已将 IQ 唤醒打一拍；消费者进入 data1 时使用 bypass2
-    // （档位定义在 AnsEntry.iqWakeupHitDataSource，与广播打拍开关绑定）。
-    // 没有新唤醒时，旁路来源下一拍衰减为 PRF。
-    val bypassExpires = DataSource.readBypass(src.dataSources) ||
-      DataSource.readBypass2(src.dataSources) || DataSource.readForward(src.dataSources)
-    dataSrcNext(s) := Mux(
-      hitAny,
-      Mux1H(winnerOH, candidates.map(_.dataSource)),
-      Mux(bypassExpires, DataSource.registerFile.U(DataSource.width.W), src.dataSources),
-    )
-    depNext(s)     := Mux(
-      hitAny,
-      Mux1H(winnerOH, candidates.map(_.dependency)),
-      VecInit(src.srcLoadDependency.map(x => (x << 1)(params.loadDependencyWidth - 1, 0))),
-    )
-    exuSrcNext(s)  := Mux(hitAny, Mux1H(winnerOH, candidates.map(_.exuSource)), src.exuSources)
-
-    // 入队补查允许当拍发射，历史结果从 PRF 读取。
-    when(delayedHit) {
-      currentStatus.srcStatus(s).srcState    := SourceState.ready.U(SourceState.width.W)
-      currentStatus.srcStatus(s).dataSources := DataSource.registerFile.U(DataSource.width.W)
-    }
-  }
-
-  val issuedNext = Mux(
-    io.deqSel && !anyLoadCancel,
-    true.B,
-    Mux(respBlock || anyLoadCancel, false.B, entryReg.status.issued),
-  )
-  val timerNext  = Mux(
-    io.deqSel,
-    AnsIssueTimer.data0.U(AnsIssueTimer.width.W),
-    Mux(
-      issuedNext && entryReg.status.issued,
+    next.dataSources       := Mux(
+      wake.wb,
+      DataSource.registerFile.U,
       Mux(
-        entryReg.status.issueTimer === AnsIssueTimer.saturated.U,
-        AnsIssueTimer.saturated.U(AnsIssueTimer.width.W),
-        entryReg.status.issueTimer + 1.U,
+        wake.iqValid,
+        DataSource.bypass.U,
+        Mux(
+          DataSource.readForward(src.dataSources),
+          DataSource.bypass.U,
+          Mux(DataSource.readBypass(src.dataSources), DataSource.registerFile.U, src.dataSources),
+        ),
       ),
-      AnsIssueTimer.saturated.U(AnsIssueTimer.width.W),
-    ),
-  )
-  val portNext   = Mux(
-    io.deqSel,
-    io.deqPortIdxWrite,
-    Mux(issuedNext, entryReg.status.deqPortIdx, 0.U),
-  )
-
-  val clear = flushed || respSuccess || io.transSel
-
-  val entryUpdate = WireInit(entryReg)
+    )
+    next.exuSources        := Mux(wake.wb, 0.U, Mux(wake.iqValid, wake.exuSource, src.exuSources))
+    next.srcLoadDependency := Mux(
+      inherentReady || wake.wb,
+      0.U.asTypeOf(issueDep),
+      shift(Mux(wake.iqValid, wake.dependency, src.srcLoadDependency)),
+    )
+  }
+  val anyLoadCancel = cancelSource.asUInt.orR
+  val issuedNext    = Mux(respBlock || anyLoadCancel, false.B, Mux(io.deqSel, true.B, status.issued))
   entryUpdate.status.blocked    := false.B
   entryUpdate.status.issued     := issuedNext
-  entryUpdate.status.hasIssued  := Mux(io.deqSel, true.B, entryReg.status.hasIssued)
-  entryUpdate.status.issueTimer := timerNext
-  entryUpdate.status.deqPortIdx := portNext
-  for (s <- 0 until params.numSrc) {
-    entryUpdate.status.srcStatus(s).srcState          := srcStateNext(s)
-    entryUpdate.status.srcStatus(s).dataSources       := dataSrcNext(s)
-    entryUpdate.status.srcStatus(s).srcLoadDependency := depNext(s)
-    entryUpdate.status.srcStatus(s).exuSources        := exuSrcNext(s)
-    entryUpdate.status.srcStatus(s).useRegCache       := false.B
-  }
+  entryUpdate.status.hasIssued  := status.hasIssued || io.deqSel
+  entryUpdate.status.issueTimer := Mux(
+    io.deqSel,
+    AnsIssueTimer.data0.U,
+    Mux(
+      issuedNext && status.issued,
+      Mux(status.issueTimer === AnsIssueTimer.saturated.U, status.issueTimer, status.issueTimer + 1.U),
+      AnsIssueTimer.saturated.U,
+    ),
+  )
+  entryUpdate.status.deqPortIdx := Mux(io.deqSel, io.deqPortIdxWrite, Mux(issuedNext, status.deqPortIdx, 0.U))
 
-  val validNext =
-    if (isEnq) Mux(enqFire, true.B, Mux(clear, false.B, validReg))
-    else Mux(io.enq.valid, true.B, Mux(clear, false.B, validReg))
-
-  when(io.enq.valid && io.enqReady) {
+  when(enqFire) {
     entryReg := io.enq.bits
+    validReg := true.B
   }.otherwise {
     entryReg := entryUpdate
-  }
-  validReg := validNext
-
-  io.valid          := validReg
-  io.issued         := entryReg.status.issued
-  io.canIssue       := validReg && currentStatus.canIssue && !flushed
-  io.fuType         := entryReg.status.fuType
-  io.robIdx         := entryReg.status.robIdx
-  io.dataSources    := VecInit(entryReg.status.srcStatus.map(_.dataSources))
-  io.exuSources     := VecInit(entryReg.status.srcStatus.map(_.exuSources))
-  io.loadDependency := AnsIssueUtils.mergeLoadDependency(entryReg.status.srcStatus.map(_.srcLoadDependency))
-
-  val entryOut = Wire(new AnsEntryBundle(params, iq))
-  entryOut        := entryReg
-  entryOut.status := currentStatus
-  for (s <- 0 until params.numSrc) {
-    entryOut.status.srcStatus(s).srcLoadDependency := depNext(s)
+    when(flushed || respSuccess || io.transSel)(validReg := false.B)
   }
 
-  io.entry.valid := validReg
-  io.entry.bits  := entryOut
-
-  io.transEntry.valid := validReg && !flushed && !entryReg.status.issued
-  io.transEntry.bits  := entryUpdate
-
-  io.enqReady       := !validReg || io.transSel
-  io.cancelBypass   := validReg && anyLoadCancel
-  io.isFirstIssue   := !entryReg.status.hasIssued
-  io.issueTimerRead := entryReg.status.issueTimer
-  io.deqPortIdxRead := entryReg.status.deqPortIdx
+  io.valid  := validReg
+  io.issued := status.issued
+  val canIssueBypass = sourceReady.asUInt.andR && !status.issued && !status.blocked
+  io.canIssue          := validReg && canIssueBypass && !flushed
+  io.fuType            := status.fuType
+  io.robIdx            := status.robIdx
+  io.dataSources       := VecInit(issueStatus.srcStatus.map(_.dataSources))
+  io.exuSources        := VecInit(issueStatus.srcStatus.map(_.exuSources))
+  io.loadDependency    := AnsIssueUtils.mergeLoadDependency(issueStatus.srcStatus.map(_.srcLoadDependency))
+  io.entry.valid       := validReg
+  io.entry.bits        := entryReg
+  io.entry.bits.status := issueStatus
+  io.transEntry.valid  := validReg && !flushed && !status.issued
+  io.transEntry.bits   := entryUpdate
+  io.enqReady          := !validReg || io.transSel
+  io.cancelBypass      := validReg && anyLoadCancel
+  io.isFirstIssue      := !status.hasIssued
+  io.issueTimerRead    := status.issueTimer
+  io.deqPortIdxRead    := status.deqPortIdx
 }

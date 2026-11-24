@@ -3,8 +3,8 @@
  * 指令从 IQ 出队时按固定延迟进入对应深度的移位管线，延迟到达后广播给
  * 其它 IQ。遇到 redirect / load cancel / data0-data1 block 时删除对应唤醒。
  *
- * 注意：Delay-0 管线是组合直通；Backend 在广播前统一打一拍，避免 IQ
- * 内部形成组合环，同时仍比真正的 WB 唤醒早。
+ * 各 latency 管线合流后仅有一个输出寄存级；Backend 组合广播。
+ * latency0 与生产者 data0 同拍，由接收方过滤 data0Cancel。
  */
 package ansercore.backend.issue
 
@@ -52,13 +52,17 @@ class AnsWakeupPipe(val depth: Int, val params: BundleParams = BundleParams()) e
     val bits   = io.enq.bits +: Seq.fill(depth)(Reg(new AnsIqWakeUp(params)))
 
     for (i <- 0 until depth) {
-      valids(i + 1) := (if (i == 0) valids(i) else valids(i) && !flushFunc(bits(i), i))
+      valids(i + 1) := valids(i) && (if (i == 0) !AnsIssueUtils.needFlush(bits(i).robIdx, io.flush.redirect)
+                                     else !flushFunc(bits(i), i))
       when(valids(i)) {
         bits(i + 1) := (if (i == 0) bits(i) else shiftDependency(bits(i)))
       }
     }
 
-    io.deq.valid := valids.last
+    // 输出级也要做一次 flush 检查。XiangShan MultiWakeupQueue 对每个 pipe 的
+    // deq 再执行 flushFunc(deq.bits, lat)，因此 depth=1 的 data0Fail、depth=2 的
+    // data1Fail 不会漏到 IQ/Dispatch。depth>=3 的 data0/data1 已在 stage1/2 检查。
+    io.deq.valid := valids.last && !flushFunc(bits.last, depth)
     io.deq.bits  := bits.last
   }
 }
@@ -89,10 +93,20 @@ class AnsMultiWakeupQueue(
   }
 
   val pipeValid = VecInit(pipes.map(_.io.deq.valid))
-  val pipeBits  = VecInit(pipes.map(_.io.deq.bits))
+  val pipeBits  = VecInit(pipes.zip(sortedLat).map { case (pipe, lat) =>
+    val bits = WireInit(pipe.io.deq.bits)
+    if (lat > 0) bits.loadDependency := AnsIssueUtils.shiftLoadDependency(pipe.io.deq.bits.loadDependency)
+    bits
+  })
 
-  io.deq.valid := pipeValid.asUInt.orR
-  io.deq.bits  := Mux1H(pipeValid, pipeBits)
+  val merged   = Mux1H(pipeValid, pipeBits)
+  val outValid = RegInit(false.B)
+  val outBits  = Reg(new AnsIqWakeUp(params))
+  // latency0 的依赖已在 Entry 发射时为 data0 移位，不再次移动。
+  outValid     := pipeValid.asUInt.orR && !AnsIssueUtils.needFlush(merged.robIdx, io.flush.redirect)
+  when(pipeValid.asUInt.orR)(outBits := merged)
+  io.deq.valid := outValid && !AnsIssueUtils.needFlush(outBits.robIdx, io.flush.redirect)
+  io.deq.bits  := outBits
 
   when(PopCount(pipeValid) > 1.U) {
     assert(false.B, "multiple wakeup pipes fire in the same cycle")

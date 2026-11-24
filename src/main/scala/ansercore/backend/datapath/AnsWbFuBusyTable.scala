@@ -3,12 +3,13 @@
  * 每个 IQ 已经按自己的 EXU 维护一份写回槽表；这里按物理写口 OR 合并，
  * 并把同一拍多个 EXU 预约同一槽的冲突回送给 DataPath。
  */
-package ansercore.backend.issue
+package ansercore.backend.datapath
 
 import chisel3._
 import chisel3.util._
 
 import ansercore.backend.Bundles._
+import ansercore.backend.issue.AnsIssueParams
 
 class AnsWbFuBusyTable(val params: BundleParams = BundleParams()) extends Module {
   val nExu      = AnsIssueParams.nExu
@@ -39,7 +40,10 @@ class AnsWbFuBusyTable(val params: BundleParams = BundleParams()) extends Module
     (merged, conflict)
   }
 
-  for (p <- 0 until AnsIssueParams.nIntWb) {
+  // ALU lat0 与 MUL/F2I lat2 的跨周期写口冲突；同拍冲突仍由 data0 仲裁。
+  val intWbReservePorts: Seq[Int] = Seq(1, 2)
+
+  for (p <- intWbReservePorts) {
     val members = AnsIssueParams.allExus.filter(_.intWbPort == p)
     if (members.nonEmpty) {
       val (merged, conflict) = mergeReservations(
@@ -53,17 +57,5 @@ class AnsWbFuBusyTable(val params: BundleParams = BundleParams()) extends Module
     }
   }
 
-  for (p <- 0 until AnsIssueParams.nFpWb) {
-    val members = AnsIssueParams.allExus.filter(_.fpWbPort == p)
-    if (members.nonEmpty) {
-      val (merged, conflict) = mergeReservations(
-        members.map(e => io.write(e.exuIdx).fpWbBusyTable),
-        members.map(e => io.write(e.exuIdx).fpDeqRespSet),
-      )
-      members.foreach { e =>
-        io.read(e.exuIdx).fpWbBusyTable  := merged
-        io.conflict(e.exuIdx).fpConflict := conflict
-      }
-    }
-  }
+  // FP 三个 FEX 各有独立 FpWB；load 口预留给 LSU，不在这里合并。
 }

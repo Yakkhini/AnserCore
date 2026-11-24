@@ -1,11 +1,8 @@
 /* BusyTable：物理寄存器就绪状态跟踪（设计文档 §5.1）。
  *
- * 本版只维护 ready/busy，不维护 loadDependency（见 Dispatch 计划）：
- * - 分配：pdest 置忙（同拍读口旁路）；
- * - 写回 / IQ 唤醒：置就绪；
- * - data0CancelToDispatch：重新置忙。
- * 表项用 busy/ready 编码：busy 表示未就绪，ready 表示已就绪。
- * 复位全 ready，与香山一致；整型物理寄存器 0 恒 ready。
+ * 分配置忙，实际 WB 清依赖，IQ 唤醒保存下一拍年龄的依赖。
+ * data0Cancel 只过滤同拍 0-lat 唤醒；load cancel 撤回已有 ready。
+ * 复位全 ready；整数零寄存器恒 ready 且无依赖。
  */
 package ansercore.backend.dispatch
 
@@ -13,6 +10,7 @@ import chisel3._
 import chisel3.util._
 
 import ansercore.backend.Bundles._
+import ansercore.backend.issue.AnsIssueUtils
 
 class AnsBusyTable(
   val params:       BundleParams = BundleParams(),
@@ -36,13 +34,15 @@ class AnsBusyTable(
     val read       = Vec(
       numReadPorts,
       new Bundle {
-        val req  = Input(UInt(addrWidth.W))
-        val busy = Output(Bool())
+        val req            = Input(UInt(addrWidth.W))
+        val busy           = Output(Bool())
+        val loadDependency = Output(Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W)))
       },
     )
     val allocPregs = Input(Vec(nAlloc, Valid(UInt(addrWidth.W))))
     val wbPregs    = Input(Vec(nWb, Valid(UInt(addrWidth.W))))
     val wakeUp     = Input(Vec(nWakeUp, Valid(new AnsIQWakeUpBundle(params))))
+    val ldCancel   = Input(Vec(params.loadPipelineWidth, new LoadCancel))
     val cancel     = Input(Vec(nCancel, new CancelSignal(params)))
   })
 
@@ -52,38 +52,46 @@ class AnsBusyTable(
   val allocMask = toMask(io.allocPregs)
   val wbMask    = toMask(io.wbPregs)
 
-  val cancelMask = VecInit(io.cancel.map { c =>
-    val wen = if (isInt) c.intWen else c.fpWen
-    Mux(wen, UIntToOH(c.pdest, numEntries), 0.U(numEntries.W))
-  }).reduce(_ | _)
-
-  val wakeUpMask = io.wakeUp
-    .map { w =>
-      val wen = if (isInt) w.bits.rfWen else w.bits.fpWen
-      Mux(w.valid && wen, UIntToOH(w.bits.pdest, numEntries), 0.U(numEntries.W))
-    }
-    .foldLeft(0.U(numEntries.W))(_ | _) & (~cancelMask).asUInt
-
-  val table = RegInit(VecInit(Seq.fill(numEntries)(ready)))
-
+  val table        = RegInit(VecInit(Seq.fill(numEntries)(ready)))
+  val dependencies = RegInit(
+    VecInit(Seq.fill(numEntries)(0.U.asTypeOf(Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W)))))
+  )
+  val wakes        = io.wakeUp.map { w =>
+    val wen         = if (isInt) w.bits.rfWen else w.bits.fpWen
+    val data0Cancel = io.cancel
+      .map(c => (if (isInt) c.intWen else c.fpWen) && c.pdest === w.bits.pdest)
+      .reduce(_ || _)
+    w.valid && wen && !(w.bits.is0Lat && data0Cancel) && !LoadShouldCancel(w.bits.loadDependency, io.ldCancel)
+  }
   for (idx <- 0 until numEntries) {
-    when((wakeUpMask | wbMask)(idx)) {
-      table(idx) := ready
-    }.elsewhen((allocMask | cancelMask)(idx)) {
+    val hits = wakes.zip(io.wakeUp).map { case (valid, w) => valid && w.bits.pdest === idx.U }
+    val hit  = hits.foldLeft(false.B)(_ || _)
+    val dep  =
+      if (hits.nonEmpty) Mux1H(PriorityEncoderOH(VecInit(hits).asUInt), io.wakeUp.map(_.bits.loadDependency))
+      else 0.U.asTypeOf(dependencies(idx))
+    dependencies(idx) := AnsIssueUtils.shiftLoadDependency(dependencies(idx))
+    when(allocMask(idx)) {
+      table(idx)        := busy
+      dependencies(idx) := 0.U.asTypeOf(dep)
+    }.elsewhen(wbMask(idx)) {
+      table(idx)        := ready
+      dependencies(idx) := 0.U.asTypeOf(dep)
+    }.elsewhen(hit) {
+      table(idx)        := ready
+      dependencies(idx) := AnsIssueUtils.shiftLoadDependency(dep)
+    }.elsewhen(LoadShouldCancel(dependencies(idx), io.ldCancel)) {
       table(idx) := busy
     }
   }
   if (isInt) {
-    table(0) := ready
+    table(0)        := ready
+    dependencies(0) := 0.U.asTypeOf(dependencies(0))
   }
-
-  for ((port, idx) <- io.read.zipWithIndex) {
-    if (isInt) {
-      val readBypass = io.allocPregs.map(a => a.valid && a.bits === port.req).reduce(_ || _)
-      port.busy := Mux(port.req === 0.U, false.B, table(port.req) || readBypass)
-    } else {
-      val readBypass = io.allocPregs.map(a => a.valid && a.bits === port.req).reduce(_ || _)
-      port.busy := table(port.req) || readBypass
-    }
+  for (port <- io.read) {
+    val zero      = if (isInt) port.req === 0.U else false.B
+    val allocated = io.allocPregs.map(a => a.valid && a.bits === port.req).reduce(_ || _)
+    val cancelled = LoadShouldCancel(dependencies(port.req), io.ldCancel)
+    port.busy           := !zero && (table(port.req) || allocated || cancelled)
+    port.loadDependency := Mux(zero || allocated, 0.U.asTypeOf(dependencies(0)), dependencies(port.req))
   }
 }

@@ -38,10 +38,11 @@ case object AnsUncertainLatency extends AnsFuLatency {
 }
 
 final case class AnsFuConfig(
-  name:       String,
-  fuType:     Int,
-  latency:    AnsFuLatency,
-  writesData: Boolean = true,
+  name:        String,
+  fuType:      Int,
+  latency:     AnsFuLatency,
+  writesIntRf: Boolean = true,
+  writesFpRf:  Boolean = false,
 ) {
   require(
     fuType > 0 && fuType < (1 << FuType.width) && Integer.bitCount(fuType) == 1,
@@ -54,38 +55,74 @@ final case class AnsFuConfig(
   * `intRdPorts` / `fpRdPorts` 按源槽给出 PRF 读口编号（-1 表示该槽不读对应寄存器堆）。 `intWbPort` / `fpWbPort` 是写回端口编号，-1 表示不写回。
   */
 final case class AnsExuParams(
-  name:        String,
-  exuIdx:      Int,
-  schdType:    AnsSchedulerType,
-  fuConfigs:   Seq[AnsFuConfig],
-  intRdPorts:  Seq[Int],
-  fpRdPorts:   Seq[Int],
-  intWbPort:   Int     = -1,
-  fpWbPort:    Int     = -1,
-  numRegSrc:   Int     = 3,
-  isLoad:      Boolean = false,
-  isStore:     Boolean = false,
-  hasRedirect: Boolean = false,
-  needPc:      Boolean = false,
+  name:               String,
+  exuIdx:             Int,
+  schdType:           AnsSchedulerType,
+  fuConfigs:          Seq[AnsFuConfig],
+  intRdPorts:         Seq[Int],
+  intRdPriority:      Seq[Int] = Seq.fill(3)(0),
+  fpRdPorts:          Seq[Int],
+  fpRdPriority:       Seq[Int] = Seq.fill(3)(0),
+  intWbPort:          Int      = -1,
+  intWbPriority:      Int      = 0,
+  uncertainIntWbPort: Int      = -1,
+  fpWbPort:           Int      = -1,
+  fpWbPriority:       Int      = 0,
+  numRegSrc:          Int      = 3,
+  isLoad:             Boolean  = false,
+  isStore:            Boolean  = false,
+  hasRedirect:        Boolean  = false,
+  needPc:             Boolean  = false,
 ) {
   require(fuConfigs.nonEmpty, s"$name must contain at least one FU")
   require(exuIdx >= 0, s"$name EXU index must be non-negative")
   require(numRegSrc > 0, s"$name must have at least one source slot")
   require(fuConfigs.map(_.fuType).distinct.size == fuConfigs.size, s"$name FU types must be unique")
   require(intRdPorts.length == numRegSrc && fpRdPorts.length == numRegSrc, s"$name read-port count mismatch")
+  require(intRdPriority.length == numRegSrc && fpRdPriority.length == numRegSrc, s"$name read-priority count mismatch")
   require((intRdPorts ++ fpRdPorts).forall(_ >= -1), s"$name read ports must be -1 or non-negative")
+  require((intRdPriority ++ fpRdPriority).forall(_ >= 0), s"$name read priorities must be non-negative")
+  require(uncertainIntWbPort >= -1, s"$name uncertain completion port must be -1 or non-negative")
   require(intWbPort >= -1 && fpWbPort >= -1, s"$name writeback ports must be -1 or non-negative")
+  require(intWbPriority >= 0 && fpWbPriority >= 0, s"$name writeback priorities must be non-negative")
+
+  if (splitUncertain) {
+    val grouped = uncertainGroups.flatten
+    require(uncertainGroups.size == 2 && uncertainGroups.forall(_.nonEmpty), s"$name requires DIV and CSR/FENCE groups")
+    require(grouped.distinct.size == grouped.size, s"$name uncertain groups must be disjoint")
+    require(
+      grouped.toSet == fuConfigs.filter(_.latency.value.isEmpty).map(_.fuType).toSet,
+      s"$name uncertain groups must exactly cover uncertain FUs and exclude fixed FUs",
+    )
+    require(
+      fuConfigs.filter(c => grouped.contains(c.fuType)).forall(!_.writesFpRf),
+      s"$name uncertain completion cannot write the FP register file",
+    )
+  }
 
   def validate(params: BundleParams): Unit = {
     require(exuIdx < params.maxExuCount, s"$name EXU index exceeds source encoding capacity")
     require(numRegSrc == params.numSrc, s"$name source count differs from BundleParams")
     require(fuLatencyMap.values.forall(_ <= params.maxLatency), s"$name latency exceeds busy-table capacity")
+    require(
+      !(hasUncertainFu && fuLatencyMap.values.exists(_ == 0)),
+      s"$name cannot mix an uncertain FU with a fixed lat0 FU",
+    )
+    require(uncertainIntWbPort < AnsIssueParams.nIntWb, s"$name uncertain completion port out of range")
+    require(!splitUncertain || uncertainIntWbPort != intWbPort, s"$name completion paths must use separate write ports")
     require(intWbPort < AnsIssueParams.nIntWb && fpWbPort < AnsIssueParams.nFpWb, s"$name writeback port out of range")
     require(
       intRdPorts.forall(_ < AnsIssueParams.nIntRd) && fpRdPorts.forall(_ < AnsIssueParams.nFpRd),
       s"$name read port out of range",
     )
   }
+
+  /** Shared issue owner with independent DIV and CSR/FENCE completion paths. */
+  def splitUncertain: Boolean        = uncertainIntWbPort >= 0
+  def uncertainGroups: Seq[Seq[Int]] =
+    if (splitUncertain) Seq(Seq(FuType.div), Seq(FuType.csr, FuType.fence)) else Seq.empty
+  def uncertainFuMask: BigInt        =
+    fuConfigs.filter(_.latency.value.isEmpty).map(c => BigInt(c.fuType)).foldLeft(BigInt(0))(_ | _)
 
   def fuTypes: Seq[Int] = fuConfigs.map(_.fuType).distinct
 
@@ -95,8 +132,6 @@ final case class AnsExuParams(
 
   private def fixedLatencyMap(configs: Seq[AnsFuConfig]): Map[Int, Int] =
     configs.flatMap(cfg => cfg.latency.value.map(cycles => cfg.fuType -> cycles)).toMap
-
-  private def wbLatencyMap: Map[Int, Int] = fixedLatencyMap(fuConfigs.filter(_.writesData))
 
   def wakeupFuLatencySet: Set[Int] = fuLatencyMap.values.toSet
 
@@ -129,18 +164,37 @@ final case class AnsExuParams(
       fpLatency      = math.max(1, fuLatencyMap.values.foldLeft(0)(_ max _)),
     )
 
-  /** 该 EXU 的写回域/端口（用于 DataPath 和 WbFuBusyTable）。 */
+  /** 该 EXU 的写回域/端口（用于 DataPath 和 WbFuBusyTable）。
+    *
+    * 统计可能写对应 PRF 的 FU：falu 比较/分类写 int、算术写 FP；fcvt 也可能写两种域，fmac 只写 FP。 每条指令是否预约由实际 intWen/fpWen 决定。
+    */
   def intWbLatencyMap: Map[Int, Int] =
-    if (writesInt) wbLatencyMap else Map.empty
+    if (writesInt) fixedLatencyMap(fuConfigs.filter(_.writesIntRf)) else Map.empty
 
   def fpWbLatencyMap: Map[Int, Int] =
-    if (writesFp) wbLatencyMap else Map.empty
+    if (writesFp) fixedLatencyMap(fuConfigs.filter(_.writesFpRf)) else Map.empty
 
   def isIntLatencyCertain: Boolean =
-    !writesInt || fuConfigs.filter(_.writesData).forall(_.latency.value.nonEmpty)
+    !writesInt || splitUncertain || fuConfigs.filter(_.writesIntRf).forall(_.latency.value.nonEmpty)
 
   def isFpLatencyCertain: Boolean =
-    !writesFp || fuConfigs.filter(_.writesData).forall(_.latency.value.nonEmpty)
+    !writesFp || fuConfigs.filter(_.writesFpRf).forall(_.latency.value.nonEmpty)
+
+  def isIntExeUnit: Boolean = schdType == AnsIntScheduler
+  def isFpExeUnit: Boolean  = schdType == AnsFpScheduler
+  def isMemExeUnit: Boolean = schdType == AnsMemScheduler
+
+  /** 该 fuType 是否属于不确定延迟操作。 */
+  def isUncertainFu(fuType: UInt): Bool = {
+    val bits = fuConfigs.filter(_.latency.value.isEmpty).map(cfg => fuType === cfg.fuType.U)
+    bits.reduceOption(_ || _).getOrElse(false.B)
+  }
+
+  /** 该 fuType 是否属于某个固定延迟 FU。 */
+  def isFixedFu(fuType: UInt): Bool = {
+    val bits = fuConfigs.filter(_.latency.value.nonEmpty).map(cfg => fuType === cfg.fuType.U)
+    bits.reduceOption(_ || _).getOrElse(false.B)
+  }
 }
 
 /** 单个 IQ 的静态属性；每个出队口对应一个 ExeUnit。 */
@@ -174,6 +228,20 @@ final case class AnsIssueQueueParams(
   require(
     exus.combinations(2).forall { case Seq(a, b) => a.fuTypes.toSet.intersect(b.fuTypes.toSet).isEmpty },
     s"$name dequeue ports must accept disjoint FU sets",
+  )
+  // 同一个 IQ 的两个出口不得共享 PRF 读/写口；跨 IQ 共享是允许的。
+  require(
+    exus.combinations(2).forall { case Seq(a, b) =>
+      val aIntRd = a.intRdPorts.filter(_ >= 0).toSet
+      val bIntRd = b.intRdPorts.filter(_ >= 0).toSet
+      val aFpRd  = a.fpRdPorts.filter(_ >= 0).toSet
+      val bFpRd  = b.fpRdPorts.filter(_ >= 0).toSet
+      (aIntRd & bIntRd).isEmpty &&
+      (aFpRd & bFpRd).isEmpty &&
+      (a.intWbPort < 0 || a.intWbPort != b.intWbPort) &&
+      (a.fpWbPort < 0 || a.fpWbPort != b.fpWbPort)
+    },
+    s"$name dequeue ports must use disjoint PRF ports",
   )
 
   def numDeq: Int = exus.size
@@ -263,39 +331,60 @@ final case class AnsSchedulerParams(
 
 /** 雁栖湖后端 Issue 域的唯一拓扑来源。 */
 object AnsIssueParams {
-  private def fixed(fuType: Int, cycles: Int, name: String): AnsFuConfig =
-    AnsFuConfig(name, fuType, AnsCertainLatency(cycles))
+  private def fixed(
+    fuType:    Int,
+    cycles:    Int,
+    name:      String,
+    writesInt: Boolean = true,
+    writesFp:  Boolean = false,
+  ): AnsFuConfig =
+    AnsFuConfig(name, fuType, AnsCertainLatency(cycles), writesIntRf = writesInt, writesFpRf = writesFp)
 
-  private def uncertain(fuType: Int, name: String): AnsFuConfig =
-    AnsFuConfig(name, fuType, AnsUncertainLatency)
+  private def uncertain(
+    fuType:    Int,
+    name:      String,
+    writesInt: Boolean = true,
+    writesFp:  Boolean = false,
+  ): AnsFuConfig =
+    AnsFuConfig(name, fuType, AnsUncertainLatency, writesIntRf = writesInt, writesFpRf = writesFp)
 
   private def exu(
-    name:               String,
-    exuIdx:             Int,
-    schdType:           AnsSchedulerType,
-    fuConfigs:          Seq[AnsFuConfig],
-    intRdPorts:         Seq[Int] = Seq(-1, -1, -1),
-    fpRdPorts:          Seq[Int] = Seq(-1, -1, -1),
-    intWbPort:          Int      = -1,
-    fpWbPort:           Int      = -1,
-    isLoad:             Boolean  = false,
-    isStore:            Boolean  = false,
-    hasRedirect:        Boolean  = false,
-    needPc:             Boolean  = false,
+    name:                             String,
+    exuIdx:                           Int,
+    schdType:                         AnsSchedulerType,
+    fuConfigs:                        Seq[AnsFuConfig],
+    intRdPorts:                       Seq[Int] = Seq(-1, -1, -1),
+    intRdPriority:                    Seq[Int] = Seq(0, 0, 0),
+    fpRdPorts:                        Seq[Int] = Seq(-1, -1, -1),
+    fpRdPriority:                     Seq[Int] = Seq(0, 0, 0),
+    intWbPort:                        Int      = -1,
+    intWbPriority:                    Int      = 0,
+    uncertainIntWbPort:               Int      = -1,
+    fpWbPort:                         Int      = -1,
+    fpWbPriority:                     Int      = 0,
+    isLoad:                           Boolean  = false,
+    isStore:                          Boolean  = false,
+    hasRedirect:                      Boolean  = false,
+    needPc:                           Boolean  = false,
   ): AnsExuParams =
     AnsExuParams(
-      name        = name,
-      exuIdx      = exuIdx,
-      schdType    = schdType,
-      fuConfigs   = fuConfigs,
-      intRdPorts  = intRdPorts,
-      fpRdPorts   = fpRdPorts,
-      intWbPort   = intWbPort,
-      fpWbPort    = fpWbPort,
-      isLoad      = isLoad,
-      isStore     = isStore,
-      hasRedirect = hasRedirect,
-      needPc      = needPc,
+      name               = name,
+      exuIdx             = exuIdx,
+      schdType           = schdType,
+      fuConfigs          = fuConfigs,
+      intRdPorts         = intRdPorts,
+      intRdPriority      = intRdPriority,
+      fpRdPorts          = fpRdPorts,
+      fpRdPriority       = fpRdPriority,
+      intWbPort          = intWbPort,
+      intWbPriority      = intWbPriority,
+      uncertainIntWbPort = uncertainIntWbPort,
+      fpWbPort           = fpWbPort,
+      fpWbPriority       = fpWbPriority,
+      isLoad             = isLoad,
+      isStore            = isStore,
+      hasRedirect        = hasRedirect,
+      needPc             = needPc,
     )
 
   // Global ExeUnit order follows the issue-port order below.  Keep it stable:
@@ -305,61 +394,73 @@ object AnsIssueParams {
       "ALU0",
       0,
       AnsIntScheduler,
-      Seq(fixed(FuType.alu, 0, "alu"), fixed(FuType.mul, 2, "mul"), fixed(FuType.bku, 2, "bku")),
-      intRdPorts  = Seq(0, 1, -1),
-      intWbPort   = 0,
+      Seq(fixed(FuType.alu, 0, "alu")),
+      intRdPorts         = Seq(0, 1, -1),
+      intRdPriority      = Seq(0, 0, 0),
+      intWbPort          = 0,
+      intWbPriority      = 0,
     ),
     exu(
-      "BJU0",
+      "MUL0",
       1,
       AnsIntScheduler,
-      Seq(fixed(FuType.brh, 0, "brh"), fixed(FuType.jmp, 0, "jmp")),
-      intRdPorts  = Seq(2, 3, -1),
-      intWbPort   = 0,
-      hasRedirect = true,
-      needPc      = true,
+      Seq(
+        fixed(FuType.mul, 2, "mul"),
+        fixed(FuType.bku, 2, "bku"),
+        uncertain(FuType.div, "div"),
+        uncertain(FuType.csr, "csr"),
+        uncertain(FuType.fence, "fence", writesInt = false),
+      ),
+      intRdPorts         = Seq(4, 5, -1),
+      intRdPriority      = Seq(1, 1, 0),
+      intWbPort          = 1,
+      intWbPriority      = 1,
+      uncertainIntWbPort = 3,
     ),
     exu(
       "ALU1",
       2,
       AnsIntScheduler,
-      Seq(fixed(FuType.alu, 0, "alu"), fixed(FuType.mul, 2, "mul"), fixed(FuType.bku, 2, "bku")),
-      intRdPorts  = Seq(4, 5, -1),
-      intWbPort   = 1,
+      Seq(fixed(FuType.alu, 0, "alu")),
+      intRdPorts         = Seq(2, 3, -1),
+      intRdPriority      = Seq(0, 0, 0),
+      intWbPort          = 1,
+      intWbPriority      = 0,
     ),
     exu(
-      "BJU1",
+      "MUL1",
       3,
       AnsIntScheduler,
-      Seq(fixed(FuType.brh, 0, "brh"), fixed(FuType.jmp, 0, "jmp")),
-      intRdPorts  = Seq(6, 7, -1),
-      intWbPort   = 1,
-      hasRedirect = true,
-      needPc      = true,
+      Seq(
+        fixed(FuType.mul, 2, "mul"),
+        fixed(FuType.bku, 2, "bku"),
+      ),
+      intRdPorts         = Seq(0, 1, -1),
+      intRdPriority      = Seq(1, 1, 0),
+      intWbPort          = 2,
+      intWbPriority      = 1,
     ),
     exu(
       "ALU2",
       4,
       AnsIntScheduler,
       Seq(fixed(FuType.alu, 0, "alu")),
-      intRdPorts  = Seq(8, 9, -1),
-      intWbPort   = 2,
+      intRdPorts         = Seq(4, 5, -1),
+      intRdPriority      = Seq(0, 0, 0),
+      intWbPort          = 2,
+      intWbPriority      = 0,
     ),
     exu(
-      "CSR0",
+      "BJU0",
       5,
       AnsIntScheduler,
-      Seq(
-        fixed(FuType.brh, 0, "brh"),
-        fixed(FuType.jmp, 0, "jmp"),
-        uncertain(FuType.csr, "csr"),
-        uncertain(FuType.fence, "fence"),
-        uncertain(FuType.div, "div"),
-      ),
-      intRdPorts  = Seq(0, 1, -1),
-      intWbPort   = 3,
-      hasRedirect = true,
-      needPc      = true,
+      Seq(fixed(FuType.brh, 0, "brh"), fixed(FuType.jmp, 0, "jmp")),
+      intRdPorts         = Seq(2, 3, -1),
+      intRdPriority      = Seq(1, 1, 0),
+      intWbPort          = 0,
+      intWbPriority      = 1,
+      hasRedirect        = true,
+      needPc             = true,
     ),
   )
 
@@ -368,50 +469,93 @@ object AnsIssueParams {
       "FEX0",
       6,
       AnsFpScheduler,
-      Seq(fixed(FuType.falu, 1, "falu"), fixed(FuType.fmac, 3, "fmac"), fixed(FuType.fcvt, 2, "fcvt")),
-      intRdPorts = Seq(0, 1, -1),
-      fpRdPorts  = Seq(0, 1, 2),
-      fpWbPort   = 0,
+      Seq(
+        fixed(FuType.falu, 1, "falu", writesInt = true, writesFp  = true),
+        fixed(FuType.fmac, 3, "fmac", writesInt = false, writesFp = true),
+        fixed(FuType.fcvt, 2, "fcvt", writesInt = true, writesFp  = true),
+      ),
+      intRdPorts    = Seq(0, -1, -1),
+      intRdPriority = Seq(2, 0, 0),
+      fpRdPorts     = Seq(0, 1, 2),
+      fpRdPriority  = Seq(0, 0, 0),
+      intWbPort     = 1,
+      intWbPriority = 2,
+      fpWbPort      = 0,
+      fpWbPriority  = 0,
     ),
     exu(
       "FEX1",
       7,
       AnsFpScheduler,
-      Seq(uncertain(FuType.fdiv, "fdiv")),
-      fpRdPorts  = Seq(3, 4, -1),
-      fpWbPort   = 1,
+      Seq(uncertain(FuType.fdiv, "fdiv", writesInt = false, writesFp = true)),
+      fpRdPorts     = Seq(3, 4, -1),
+      fpRdPriority  = Seq(0, 0, 0),
+      fpWbPort      = 1,
+      fpWbPriority  = 0,
     ),
     exu(
       "FEX2",
       8,
       AnsFpScheduler,
-      Seq(fixed(FuType.falu, 1, "falu"), fixed(FuType.fmac, 3, "fmac")),
-      fpRdPorts  = Seq(0, 1, 2),
-      fpWbPort   = 2,
+      Seq(
+        fixed(FuType.falu, 1, "falu", writesInt = true, writesFp  = true),
+        fixed(FuType.fmac, 3, "fmac", writesInt = false, writesFp = true),
+      ),
+      fpRdPorts     = Seq(0, 1, 2),
+      fpRdPriority  = Seq(1, 1, 1),
+      intWbPort     = 2,
+      intWbPriority = 3,
+      fpWbPort      = 2,
+      fpWbPriority  = 0,
     ),
   )
 
   // Load/store units live in MemBlock.  Their result path is the LSU feedback,
   // so they do not enter the PRF write ports of DataPath in this bring-up.
   val memExus: Seq[AnsExuParams] = Seq(
-    exu("LDU0", 9, AnsMemScheduler, Seq(uncertain(FuType.ldu, "ldu")), intRdPorts  = Seq(8, -1, -1), isLoad = true),
-    exu("LDU1", 10, AnsMemScheduler, Seq(uncertain(FuType.ldu, "ldu")), intRdPorts = Seq(9, -1, -1), isLoad = true),
+    exu(
+      "LDU0",
+      9,
+      AnsMemScheduler,
+      Seq(uncertain(FuType.ldu, "ldu", writesInt = true, writesFp = true)),
+      intRdPorts    = Seq(6, -1, -1),
+      intRdPriority = Seq(0, 0, 0),
+      isLoad        = true,
+    ),
+    exu(
+      "LDU1",
+      10,
+      AnsMemScheduler,
+      Seq(uncertain(FuType.ldu, "ldu", writesInt = true, writesFp = true)),
+      intRdPorts    = Seq(7, -1, -1),
+      intRdPriority = Seq(0, 0, 0),
+      isLoad        = true,
+    ),
     exu(
       "STA0",
       11,
       AnsMemScheduler,
-      Seq(uncertain(FuType.stu, "stu"), uncertain(FuType.mou, "mou")),
-      intRdPorts                                                                   = Seq(6, 7, -1),
-      isStore                                                                      = true,
+      Seq(
+        uncertain(FuType.stu, "stu", writesInt = false, writesFp = false),
+        uncertain(FuType.mou, "mou", writesInt = false, writesFp = false),
+      ),
+      intRdPorts    = Seq(3, -1, -1),
+      intRdPriority = Seq(2, 0, 0),
+      isStore       = true,
     ),
     exu(
       "STD0",
       12,
       AnsMemScheduler,
-      Seq(uncertain(FuType.stu, "stu"), uncertain(FuType.mou, "mou")),
-      intRdPorts                                                                   = Seq(5, -1, -1),
-      fpRdPorts                                                                    = Seq(5, -1, -1),
-      isStore                                                                      = true,
+      Seq(
+        uncertain(FuType.stu, "stu", writesInt = false, writesFp = false),
+        uncertain(FuType.mou, "mou", writesInt = false, writesFp = false),
+      ),
+      intRdPorts    = Seq(5, -1, -1),
+      intRdPriority = Seq(2, 0, 0),
+      fpRdPorts     = Seq(5, -1, -1),
+      fpRdPriority  = Seq(0, 0, 0),
+      isStore       = true,
     ),
   )
 
@@ -435,8 +579,13 @@ object AnsIssueParams {
     .exuIdx
 
   // ---- IQ composition (order matches AnsDispatchParams.iqList) ----
-  private val intWakeSrc: Seq[Int] = intExus.filter(_.isIQWakeUpSource).map(_.exuIdx)
-  private val fpWakeSrc: Seq[Int]  = fpExus.filter(_.isIQWakeUpSource).map(_.exuIdx)
+  // 整数 IQ 推测唤醒只由整数执行单元产生。FEX0/FEX2 的比较/分类及 F2I 整数结果按固定时刻
+  // 写回 IntWB1/IntWB2，但只产生实际 WB 唤醒，不进入整数 IQ 的推测唤醒；
+  // FEX0/FEX2 写 FP PRF 的结果继续作为 FP IQ 的推测唤醒源。
+  private val intWakeSrc: Seq[Int] =
+    allExus.filter(e => e.isIQWakeUpSource && e.writesInt && e.isIntExeUnit).map(_.exuIdx).sorted
+  private val fpWakeSrc: Seq[Int]  =
+    allExus.filter(e => e.isIQWakeUpSource && e.writesFp && e.isFpExeUnit).map(_.exuIdx).sorted
   private val memWakeSrc: Seq[Int] = Seq.empty // load wakeup (LSU) not yet wired
 
   // 整数目的寄存器只会被 Int ExeUnit 或 load 写；浮点同理。
@@ -447,6 +596,7 @@ object AnsIssueParams {
 
   // 四宽分派的容量基线：Int 3×20 + Fp 2×16 + Mem 4×16 = 156 项。
   // numEntries 包含每个 IQ 的 2 个 EnqEntry；Dispatch 参数由此处派生。
+  // 整数 IQ：ALU0+MUL0、ALU1+MUL1、ALU2+BJU0；同 IQ 两个出口读写口不相交。
   val intScheduler: AnsSchedulerParams = AnsSchedulerParams(
     AnsIntScheduler,
     Seq(
@@ -583,18 +733,24 @@ object AnsIssueParams {
   )
 
   // ---- global counts ----
-  val nExu: Int                 = allExus.size
-  val nIntWb: Int               = 4
-  val nFpWb: Int                = 4
-  val nIntRd: Int               = allExus.flatMap(_.intRdPorts).foldLeft(-1)(_ max _) + 1
-  val nFpRd: Int                = allExus.flatMap(_.fpRdPorts).foldLeft(-1)(_ max _) + 1
-  val intWakeUpExuIdx: Seq[Int] = intWakeSrc
-  val fpWakeUpExuIdx: Seq[Int]  = fpWakeSrc
-  val memWakeUpExuIdx: Seq[Int] = memWakeSrc
-  val nIntWakeUp: Int           = intWakeUpExuIdx.size
-  val nFpWakeUp: Int            = fpWakeUpExuIdx.size
-  val nMemWakeUp: Int           = memWakeUpExuIdx.size
-  val loadPipelineWidth: Int    = memExus.count(_.isLoad)
+  val nExu: Int                    = allExus.size
+  require(allExus.count(_.splitUncertain) == 1, "one shared scalar issue owner is supported")
+  val uncertainOwner: AnsExuParams = allExus.find(_.splitUncertain).get
+  val nUncertainGroups: Int        = uncertainOwner.uncertainGroups.size
+  val nCompletion: Int             = nExu + 1
+  val uncertainCompletionIdx: Int  = nExu
+  val uncertainIntWbPort: Int      = uncertainOwner.uncertainIntWbPort
+  val nIntWb: Int                  = 6
+  val nFpWb: Int                   = 5
+  val nIntRd: Int                  = allExus.flatMap(_.intRdPorts).foldLeft(-1)(_ max _) + 1
+  val nFpRd: Int                   = allExus.flatMap(_.fpRdPorts).foldLeft(-1)(_ max _) + 1
+  val intWakeUpExuIdx: Seq[Int]    = intWakeSrc
+  val fpWakeUpExuIdx: Seq[Int]     = fpWakeSrc
+  val memWakeUpExuIdx: Seq[Int]    = memWakeSrc
+  val nIntWakeUp: Int              = intWakeUpExuIdx.size
+  val nFpWakeUp: Int               = fpWakeUpExuIdx.size
+  val nMemWakeUp: Int              = memWakeUpExuIdx.size
+  val loadPipelineWidth: Int       = memExus.count(_.isLoad)
 
   val maxEntries: Int      = allIQs.map(_.numEntries).max
   val iqValidNumWidth: Int = log2Ceil(maxEntries + 1)
@@ -602,6 +758,17 @@ object AnsIssueParams {
   // data-path exus: everyone except pure memory units (they go to MemBlock).
   val datapathExus: Seq[AnsExuParams] = allExus.filterNot(e => e.isLoad || e.isStore)
   val memExuParams: Seq[AnsExuParams] = allExus.filter(e => e.isLoad || e.isStore)
+
+  /** The merged completion port has no arbiter with ordinary EXU or reserved LSU writes. */
+  def validateCompletionTopology(exus: Seq[AnsExuParams]): Unit = {
+    val owners = exus.filter(_.splitUncertain)
+    require(owners.size == 1, "one shared scalar issue owner is supported")
+    val port   = owners.head.uncertainIntWbPort
+    require(port >= 0 && port < nIntWb, "uncertain completion port out of range")
+    require(exus.forall(_.intWbPort != port), "uncertain completion write port must be globally exclusive")
+    require(!Seq(4, 5).contains(port), "uncertain completion must not use reserved load write ports")
+  }
+  validateCompletionTopology(allExus)
 
   def validate(params: BundleParams): Unit = {
     require(nExu <= params.maxExuCount, "EXU topology exceeds source encoding capacity")

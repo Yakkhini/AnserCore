@@ -55,11 +55,12 @@ class AnsMemToDispatchBundle(val params: BundleParams = BundleParams()) extends 
 
 /** Scheduler 唤醒向量中的单个唤醒事件。 */
 class AnsIQWakeUpBundle(val params: BundleParams = BundleParams()) extends Bundle {
-  val rfWen  = Bool()
-  val fpWen  = Bool()
-  val pdest  = UInt(params.physicalRegWidth.W)
-  val rcDest = UInt(params.regCacheIndexWidth.W)
-  val is0Lat = Bool()
+  val rfWen          = Bool()
+  val fpWen          = Bool()
+  val pdest          = UInt(params.physicalRegWidth.W)
+  val rcDest         = UInt(params.regCacheIndexWidth.W)
+  val is0Lat         = Bool()
+  val loadDependency = Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W))
 }
 
 /** 三类 Scheduler 的唤醒向量。 */

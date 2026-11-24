@@ -10,6 +10,7 @@ import chisel3._
 import chisel3.util._
 
 import ansercore.backend.Bundles._
+import ansercore.backend.issue.AnsIssueUtils
 
 class AnsRegCacheTagTable(
   val params:        BundleParams = BundleParams(),
@@ -39,40 +40,61 @@ class AnsRegCacheTagTable(
     val write      = Vec(
       numWritePorts,
       new Bundle {
-        val wen  = Input(Bool())
-        val addr = Input(UInt(addrWidth.W))
-        val tag  = Input(UInt(tagWidth.W))
+        val wen            = Input(Bool())
+        val addr           = Input(UInt(addrWidth.W))
+        val tag            = Input(UInt(tagWidth.W))
+        val is0Lat         = Input(Bool())
+        val loadDependency = Input(Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W)))
       },
     )
+    val ldCancel   = Input(Vec(params.loadPipelineWidth, new LoadCancel))
+    val wbPregs    = Input(Vec(AnsDispatchParams.nIntWb, Valid(UInt(tagWidth.W))))
     val cancel     = Input(Vec(nCancel, new CancelSignal(params)))
   })
 
   val validVec = RegInit(VecInit(Seq.fill(numEntries)(false.B)))
   val tagVec   = Reg(Vec(numEntries, UInt(tagWidth.W)))
 
+  val dependencies = RegInit(
+    VecInit(Seq.fill(numEntries)(0.U.asTypeOf(Vec(params.loadPipelineWidth, UInt(params.loadDependencyWidth.W)))))
+  )
+  val writeValid   = io.write.map(w =>
+    w.wen && !LoadShouldCancel(w.loadDependency, io.ldCancel) &&
+      !(w.is0Lat && io.cancel.map(c => c.intWen && c.pdest === w.tag).reduce(_ || _)) && !matchesAlloc(w.tag)
+  )
+
   def matchesAlloc(tag: UInt): Bool =
     io.allocPregs.map(a => a.valid && a.bits === tag).reduce(_ || _)
 
   for (port <- io.read) {
-    val matchOH = VecInit(validVec.zip(tagVec).map { case (v, t) => v && t === port.tag })
+    val matchOH = VecInit(
+      validVec.indices.map(i =>
+        validVec(i) && tagVec(i) === port.tag && !LoadShouldCancel(dependencies(i), io.ldCancel)
+      )
+    )
     port.valid := Mux(port.ren, matchOH.asUInt.orR, false.B) && !matchesAlloc(port.tag)
     port.addr  := OHToUInt(matchOH)
   }
 
   for (idx <- 0 until numEntries) {
-    val writeThis = io.write.map(w => w.wen && w.addr === idx.U)
-    val writeTag  = Mux1H(writeThis, io.write.map(_.tag))
-
-    // 同一 tag 被写到另一个槽位时，旧槽位失效（香山的 replace 语义）。
-    val replaceHit = io.write.map(w => w.wen && w.tag === tagVec(idx)).reduce(_ || _)
-    val allocHit   = io.allocPregs.map(a => a.valid && a.bits === tagVec(idx)).reduce(_ || _)
-    val cancelHit  = io.cancel.map(c => c.intWen && c.pdest === tagVec(idx)).reduce(_ || _)
-
+    val writeThis      = io.write.zip(writeValid).map { case (w, v) => v && w.addr === idx.U }
+    val winner         = PriorityEncoderOH(VecInit(writeThis).asUInt)
+    val writeTag       = Mux1H(winner, io.write.map(_.tag))
+    val writeDep       = Mux1H(winner, io.write.map(_.loadDependency))
+    val writeConfirmed = io.wbPregs.map(w => w.valid && w.bits === writeTag).reduce(_ || _)
+    val replaceHit     = io.write.zip(writeValid).map { case (w, v) => v && w.tag === tagVec(idx) }.reduce(_ || _)
+    val allocHit       = matchesAlloc(tagVec(idx))
+    val loadCancel     = LoadShouldCancel(dependencies(idx), io.ldCancel)
+    val confirmed      = io.wbPregs.map(w => w.valid && w.bits === tagVec(idx)).reduce(_ || _)
+    dependencies(idx) := AnsIssueUtils.shiftLoadDependency(dependencies(idx))
     when(writeThis.reduce(_ || _)) {
-      validVec(idx) := true.B
-      tagVec(idx)   := writeTag
-    }.elsewhen(replaceHit || allocHit || cancelHit) {
+      validVec(idx)     := true.B
+      tagVec(idx)       := writeTag
+      dependencies(idx) := Mux(writeConfirmed, 0.U.asTypeOf(writeDep), AnsIssueUtils.shiftLoadDependency(writeDep))
+    }.elsewhen(replaceHit || allocHit || (loadCancel && !confirmed)) {
       validVec(idx) := false.B
+    }.elsewhen(confirmed) {
+      dependencies(idx) := 0.U.asTypeOf(dependencies(idx))
     }
   }
 }

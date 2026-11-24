@@ -89,6 +89,7 @@ class AnsSchedulerSpec extends AnyFlatSpec with ChiselScalatestTester with Match
       dut.io.fpWriteBack(p).data.poke(0.U)
     }
     for (p <- 0 until AnsIssueParams.nExu) {
+      dut.io.exuBusy(p).poke(0.U)
       dut.io.wakeupIn(p).valid.poke(false.B)
       dut.io.wakeupIn(p).bits.robIdx.poke(0.U)
       dut.io.wakeupIn(p).bits.intWen.poke(false.B)
@@ -247,6 +248,70 @@ class AnsSchedulerSpec extends AnyFlatSpec with ChiselScalatestTester with Match
       }
       dut.io.intWriteBack(0).wen.poke(false.B)
       dut.io.fromDispatch(staEnq).ready.expect(true.B, "both queues have room")
+    }
+  }
+
+  it should "accept a held store exactly once on both sides after asymmetric backpressure" in {
+    test(AnsScheduler(params, schd)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      val sta = AnsIssueParams.exuIdxOf("STA0")
+      val std = AnsIssueParams.exuIdxOf("STD0")
+      // Both directions and both input lanes; upstream valid stays high while blocked.
+      for {
+        drainSta <- Seq(true, false)
+        slot     <- 0 until 2
+      } {
+        idle(dut)
+        dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B)
+        val input        = dut.io.fromDispatch(schd.dispatchPortOf("STA0", slot))
+        val pending      = Array(false, false)
+        val seen         = Array.fill(2)(scala.collection.mutable.ArrayBuffer.empty[Int])
+        def tick(): Unit = {
+          for ((port, i) <- Seq(staDeq, stdDeq).zipWithIndex if dut.io.deq(port).valid.peek().litToBoolean)
+            seen(i) += dut.io.deq(port).bits.common.robIdx.peek().litValue.toInt
+          answerDeq(dut, pending)
+          dut.clock.step()
+        }
+        storeUop(input.bits, addrReady = false, dataReady = false)
+        input.valid.poke(true.B)
+        var count        = 0
+        while (count < 32 && input.ready.peek().litToBoolean) {
+          count += 1; input.bits.robIdx.poke(count.U); tick()
+        }
+        count should be > 0; count should be < 32
+        input.valid.poke(false.B)
+        dut.io.intWriteBack(0).wen.poke(true.B)
+        dut.io.intWriteBack(0).addr.poke((if (drainSta) addrPreg else dataPreg).U)
+        for (_ <- 0 until 40) tick()
+        dut.io.intWriteBack(0).wen.poke(false.B)
+        val drained      = if (drainSta) sta else std
+        val blocked      = if (drainSta) std else sta
+        dut.io.IQValidNumVec(drained).expect(0.U)
+        dut.io.IQValidNumVec(blocked).expect(count.U)
+
+        // A new request waits with unchanged valid/bits; neither child may enqueue it.
+        storeUop(input.bits, addrReady = false, dataReady = false)
+        input.bits.robIdx.poke(60.U); input.valid.poke(true.B)
+        for (_ <- 0 until 6) {
+          input.ready.expect(false.B); tick()
+          dut.io.IQValidNumVec(drained).expect(0.U)
+          dut.io.IQValidNumVec(blocked).expect(count.U)
+        }
+        dut.io.intWriteBack(0).wen.poke(true.B)
+        dut.io.intWriteBack(0).addr.poke((if (drainSta) dataPreg else addrPreg).U)
+        var accepted = false
+        for (_ <- 0 until 40) {
+          val fire = input.valid.peek().litToBoolean && input.ready.peek().litToBoolean
+          tick()
+          if (fire) { accepted shouldBe false; accepted = true; input.valid.poke(false.B) }
+        }
+        accepted shouldBe true
+        // Wake the other half of the new request and let both queues drain.
+        dut.io.intWriteBack(0).addr.poke((if (drainSta) addrPreg else dataPreg).U)
+        for (_ <- 0 until 40) tick()
+        dut.io.intWriteBack(0).wen.poke(false.B)
+        for (side <- seen) side.sorted.toSeq shouldBe ((1 to count) :+ 60)
+        dut.io.IQValidNumVec(sta).expect(0.U); dut.io.IQValidNumVec(std).expect(0.U)
+      }
     }
   }
 }

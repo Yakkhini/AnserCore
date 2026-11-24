@@ -9,6 +9,7 @@ import chisel3._
 import chisel3.util._
 
 import ansercore.backend.Bundles._
+import ansercore.backend.datapath.AnsDataPathToIqIO
 import ansercore.backend.rename.AnsRenameRedirect
 
 /** 写回唤醒：来自某个 PRF 写端口。 */
@@ -88,7 +89,7 @@ class AnsEntryBundle(
 
 /** 一次发射选择的完整结果；条目与操作数元数据必须经过同一个选择器。
   *
-  * 操作数元数据保持选择当拍的寄存值；entry 中的依赖还包含用于条目转移的下一状态。
+  * 发射元数据包含当拍 IQ 命中，dependency 已为 data0 移位一次；迁移使用独立下一状态。
   */
 class AnsSelectedEntry(val params: BundleParams, val iq: AnsIssueQueueParams) extends Bundle {
   val entry          = new AnsEntryBundle(params, iq)
@@ -136,14 +137,13 @@ class AnsEntriesIO(
   val wakeUpFromWB = Vec(iq.wbWakeUpCount, Flipped(Valid(new AnsWbWakeUp(params))))
   val wakeUpFromIQ = Vec(iq.wakeupSourceExuIdx.size, Flipped(Valid(new AnsIqWakeUp(params))))
   val data0Cancel  = Input(Vec(AnsIssueParams.nExu, Bool()))
+  val data1Cancel  = Input(Vec(AnsIssueParams.nExu, Bool()))
   val ldCancel     = Vec(params.loadPipelineWidth, Flipped(new LoadCancel))
 
   val enqWakeUpWB1    = Vec(iq.wbWakeUpCount, Flipped(Valid(new AnsWbWakeUp(params))))
   val enqWakeUpIQ1    = Vec(iq.wakeupSourceExuIdx.size, Flipped(Valid(new AnsIqWakeUp(params))))
-  val enqWakeUpWB2    = Vec(iq.wbWakeUpCount, Flipped(Valid(new AnsWbWakeUp(params))))
-  val enqWakeUpIQ2    = Vec(iq.wakeupSourceExuIdx.size, Flipped(Valid(new AnsIqWakeUp(params))))
+  val enqLdCancel1    = Input(Vec(params.loadPipelineWidth, new LoadCancel))
   val enqData0Cancel1 = Input(Vec(AnsIssueParams.nExu, Bool()))
-  val enqData0Cancel2 = Input(Vec(AnsIssueParams.nExu, Bool()))
 
   val data0Resp = Vec(iq.numDeq, Flipped(Valid(new IssueEntryResponse(params))))
   val data1Resp = Vec(iq.numDeq, Flipped(Valid(new IssueEntryResponse(params))))
@@ -174,6 +174,7 @@ class AnsIssueQueueIO(
   val wakeUpFromWB = Vec(iq.wbWakeUpCount, Flipped(Valid(new AnsWbWakeUp(params))))
   val wakeUpFromIQ = Vec(iq.wakeupSourceExuIdx.size, Flipped(Valid(new AnsIqWakeUp(params))))
   val data0Cancel  = Input(Vec(AnsIssueParams.nExu, Bool()))
+  val data1Cancel  = Input(Vec(AnsIssueParams.nExu, Bool()))
   val ldCancel     = Vec(params.loadPipelineWidth, Flipped(new LoadCancel))
 
   val data0Resp = Vec(iq.numDeq, Flipped(Valid(new IssueEntryResponse(params))))
@@ -182,6 +183,9 @@ class AnsIssueQueueIO(
   val wbBusyTableRead  = Vec(iq.numDeq, Input(new WbFuBusyTableReadBundle(ExecutionUnitParams(), params)))
   val wbBusyTableWrite = Vec(iq.numDeq, Output(new WbFuBusyTableWriteBundle(ExecutionUnitParams(), params)))
 
+  /** 该出队口对应 EXU 的不确定延迟槽是否已占用；只屏蔽同 FU 的候选。 */
+  val exuBusy = Vec(iq.numDeq, Input(UInt(FuType.width.W)))
+
   val status         = Output(new AnsIssueQueueStatus(params, iq))
   val validCntDeqVec = Output(Vec(iq.numDeq, UInt(AnsIssueParams.iqValidNumWidth.W)))
 
@@ -189,19 +193,6 @@ class AnsIssueQueueIO(
 
   /** DataPath 必须逐拍接收；读口冲突/EXU 拒绝通过 data0/data1Resp 通知 IQ 重试，不在此停顿保持。 */
   val deq = Vec(iq.numDeq, Decoupled(new IssueQueueIssueBundle(iq.issueBundleParams, ExecutionUnitParams(), params)))
-}
-
-/** 数据通路回送：按 exuIdx 展平。 */
-class AnsDataPathToIqIO(val params: BundleParams = BundleParams()) extends Bundle {
-  val data0Resp   = Vec(AnsIssueParams.nExu, Valid(new IssueEntryResponse(params)))
-  val data1Resp   = Vec(AnsIssueParams.nExu, Valid(new IssueEntryResponse(params)))
-  val data0Cancel = Vec(AnsIssueParams.nExu, Bool())
-  val data1Cancel = Vec(AnsIssueParams.nExu, Bool())
-
-  /** 携带目的寄存器信息，送至 Dispatch 撤回 BusyTable / RegCacheTag 的就绪状态。 */
-  val data0CancelToDispatch = Vec(AnsIssueParams.nExu, new CancelSignal(params))
-  val wbConflict            = Vec(AnsIssueParams.nExu, new WbConflictBundle(ExecutionUnitParams(), params))
-  val rcDest                = Vec(AnsIssueParams.nExu, UInt(params.regCacheIndexWidth.W))
 }
 
 /** Scheduler 对外接口。所有 exu 维度都按全局 exuIdx 展平。 */
@@ -224,6 +215,9 @@ class AnsSchedulerIO(
   val wbBusyTableRead  = Vec(AnsIssueParams.nExu, Input(new WbFuBusyTableReadBundle(ExecutionUnitParams(), params)))
   val wbBusyTableWrite = Vec(AnsIssueParams.nExu, Output(new WbFuBusyTableWriteBundle(ExecutionUnitParams(), params)))
 
+  /** 来自 ExuBlock 的不确定延迟槽 busy，按全局 exuIdx 索引。 */
+  val exuBusy = Input(Vec(AnsIssueParams.nExu, UInt(FuType.width.W)))
+
   val ldCancel = Vec(params.loadPipelineWidth, Flipped(new LoadCancel))
 
   val IQValidNumVec = Output(Vec(AnsIssueParams.nExu, UInt(AnsIssueParams.iqValidNumWidth.W)))
@@ -240,52 +234,4 @@ class AnsSchedulerIO(
   )
 }
 
-/** DataPath 的 PC/target 查询接口（PcTargetMem 由 CtrlBlock 维护副本）。 */
-class AnsPcTargetRead(val params: BundleParams = BundleParams()) extends Bundle {
-  val valid     = Bool()
-  val ftqPtr    = new FtqPtr(params)
-  val ftqOffset = UInt(params.ftqOffsetWidth.W)
-  val pc        = UInt(params.pcWidth.W)
-  val target    = UInt(params.pcWidth.W)
-}
-
-class AnsPcMemWrite(val params: BundleParams = BundleParams()) extends Bundle {
-  val wen    = Bool()
-  val ftqPtr = new FtqPtr(params)
-  val pc     = UInt(params.pcWidth.W)
-  val target = UInt(params.pcWidth.W)
-}
-
-class AnsDataPathIO(val params: BundleParams = BundleParams()) extends Bundle {
-  val flush = Flipped(Valid(new AnsRenameRedirect(params)))
-
-  val fromIQ = Vec(
-    AnsIssueParams.nExu,
-    Flipped(
-      Decoupled(
-        new IssueQueueIssueBundle(
-          IssueQueueParams(AnsIssueParams.maxEntries, Seq.empty),
-          ExecutionUnitParams(numRegSrc = params.numSrc),
-          params,
-        )
-      )
-    ),
-  )
-
-  val intWriteBack = Vec(AnsIssueParams.nIntWb, Flipped(new RegisterWriteBundle(params.physicalRegWidth, params.xlen)))
-  val fpWriteBack  = Vec(AnsIssueParams.nFpWb, Flipped(new RegisterWriteBundle(params.physicalRegWidth, params.xlen)))
-
-  /** EXU 组合输出：forward / bypass 数据来源。 */
-  val exuOutput = Vec(AnsIssueParams.nExu, Flipped(Valid(new ExuOutput(params, ExecutionUnitParams()))))
-
-  val wbConflict = Vec(AnsIssueParams.nExu, Output(new WbConflictBundle(ExecutionUnitParams(), params)))
-
-  val wbBusyTableWrite = Vec(AnsIssueParams.nExu, Input(new WbFuBusyTableWriteBundle(ExecutionUnitParams(), params)))
-  val wbBusyTableRead  = Vec(AnsIssueParams.nExu, Output(new WbFuBusyTableReadBundle(ExecutionUnitParams(), params)))
-
-  val pcMemWrite = Input(new AnsPcMemWrite(params))
-
-  val toIq         = new AnsDataPathToIqIO(params)
-  val toExu        = Vec(AnsIssueParams.nExu, Decoupled(new ExuInput(params, ExecutionUnitParams(numRegSrc = params.numSrc))))
-  val rcReplaceIdx = Output(Vec(AnsIssueParams.nExu, UInt(params.regCacheIndexWidth.W)))
-}
+/* DataPath 的 IO/bundle 已迁移到 `ansercore.backend.datapath.AnsDataPathBundles`。 */

@@ -10,7 +10,7 @@ import ansercore.backend.Bundles._
 
 class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   private val params = BundleParams(renameWidth = 4)
-  private val iq     = AnsIssueParams.intScheduler.iqs(0) // Int-IQ0: ALU0 + BJU0
+  private val iq     = AnsIssueParams.intScheduler.iqs(0) // Int-IQ0: ALU0 + MUL0
 
   private def clearDynInst(uop: DynInst): Unit = {
     uop.fuType.poke(0.U)
@@ -56,8 +56,12 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
       dut.io.wakeUpFromIQ(i).bits.robIdx.poke(0.U)
       dut.io.wakeUpFromIQ(i).bits.rcDest.poke(0.U)
     }
+    for (i <- 0 until iq.numDeq) {
+      dut.io.exuBusy(i).poke(0.U)
+    }
     for (i <- 0 until AnsIssueParams.nExu) {
       dut.io.data0Cancel(i).poke(false.B)
+      dut.io.data1Cancel(i).poke(false.B)
     }
     for (i <- 0 until params.loadPipelineWidth) {
       dut.io.ldCancel(i).first.poke(false.B)
@@ -167,14 +171,13 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
       wakeup.bits.loadDependency(0).poke(1.U)
       dut.clock.step()
       wakeup.valid.poke(false.B)
-      dut.clock.step()
       dut.io.deq(0).valid.expect(true.B)
       dut.io.deq(0).bits.addrOH.expect((1 << (iq.numEnq + 1)).U)
       dut.io.deq(0).bits.common.robIdx.expect(2.U)
       dut.io.deq(0).bits.psrc(0).expect(6.U)
-      dut.io.deq(0).bits.common.dataSources(0).expect(DataSource.bypass2.U)
+      dut.io.deq(0).bits.common.dataSources(0).expect(DataSource.forward.U)
       dut.io.deq(0).bits.common.exuSources(0).expect((iq.wakeupSourceExuIdx(1) + 1).U)
-      dut.io.deq(0).bits.common.loadDependency(0).expect(1.U)
+      dut.io.deq(0).bits.common.loadDependency(0).expect(2.U)
       dut.io.deq(0).bits.common.isFirstIssue.expect(true.B)
     }
   }
@@ -278,30 +281,23 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
       dut.clock.step()
       dut.io.wakeUpFromIQ(0).valid.poke(false.B)
 
-      var seen   = false
-      var cycles = 0
-      while (!seen && cycles < 6) {
-        dut.clock.step()
-        if (dut.io.deq(0).valid.peek().litToBoolean) {
-          dut.io.deq(0).bits.common.pdest.expect(4.U)
-          seen = true
-        }
-        cycles += 1
-      }
-      seen shouldBe true
+      // IQ matches select in the broadcast cycle; deqDly is visible at this very next edge.
+      dut.io.deq(0).valid.expect(true.B)
+      dut.io.deq(0).bits.common.pdest.expect(4.U)
+      dut.io.deq(0).bits.common.dataSources(0).expect(DataSource.forward.U)
+      dut.io.deq(0).bits.common.exuSources(0).expect((iq.wakeupSourceExuIdx.head + 1).U)
+      respond(dut, robIdx = 2)
+      dut.io.status.validCnt.expect(0.U)
     }
   }
 
   /** 0-lat 唤醒 -> 发射延迟骨架。
     *
-    * 生产者（ALU，pdest = 7）与消费者（ALU，等 pdest = 7）同时入队。测试台模拟 AnsBackend 的
-    * 唤醒广播：本拍观察 `wakeupToIQ(0)`，下一拍送回 `wakeUpFromIQ(0)`
-    * （对应 `registerWakeupBroadcast = true`）。
+    * 生产者（ALU，pdest = 7）与消费者（ALU，等 pdest = 7）同时入队。测试台模拟 AnsBackend 的 组合唤醒广播：本拍观察 `wakeupToIQ(0)`，同拍送回 `wakeUpFromIQ(0)`
+    * WakeupQueue 输出已经寄存，Backend 不再增加寄存级。
     *
-    * 当前期望：生产者与消费者的 deq 相差 2 拍，且消费者读到 bypass2。
-    * 若将来开启香山式组合广播（`registerWakeupBroadcast = false`）并把
-    * `AnsEntry.iqWakeupHitDataSource` 改成 bypass，差值应变成 1，
-    * 届时同步修改测试台的打拍方式和这里的期望值。详见 IssueQueue 设计文档 §5.5。
+    * 当前期望：消费者在广播当拍（生产者 data0）被选中，生产者与消费者的 deq 相差 1 拍， 消费者读到组合 forward（`DataSource.forward`）；BN 与 EXU 之间已有
+    * `AnsExuInputPipe` 输入寄存，forward 不会成环。
     */
   it should "measure 0-lat IQ wakeup to issue latency" in {
     test(new AnsIssueQueue(params, iq)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
@@ -335,19 +331,19 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
       dut.io.enq(0).valid.poke(false.B)
       dut.io.enq(1).valid.poke(false.B)
 
-      var lastWakeupValid = false
-      var lastPdest       = 0
-      var lastIs0Lat      = false
-      var producerDeq     = -1
-      var consumerDeq     = -1
-      var cycle           = 0
+      var producerDeq = -1
+      var consumerDeq = -1
+      var cycle       = 0
       while (cycle < 20 && (producerDeq < 0 || consumerDeq < 0)) {
-        // 打入上一拍捕获的唤醒（对应 AnsBackend 的 registerWakeupBroadcast = true）。
-        dut.io.wakeUpFromIQ(0).valid.poke(lastWakeupValid.B)
-        dut.io.wakeUpFromIQ(0).bits.pdest.poke(lastPdest.U)
+        // 将已寄存的广播直接送回 IQ。
+        val wValid  = dut.io.wakeupToIQ(0).valid.peek().litToBoolean
+        val wPdest  = dut.io.wakeupToIQ(0).bits.pdest.peek().litValue.toInt
+        val wIs0Lat = dut.io.wakeupToIQ(0).bits.is0Lat.peek().litToBoolean
+        dut.io.wakeUpFromIQ(0).valid.poke(wValid.B)
+        dut.io.wakeUpFromIQ(0).bits.pdest.poke(wPdest.U)
         dut.io.wakeUpFromIQ(0).bits.intWen.poke(true.B)
         dut.io.wakeUpFromIQ(0).bits.fpWen.poke(false.B)
-        dut.io.wakeUpFromIQ(0).bits.is0Lat.poke(lastIs0Lat.B)
+        dut.io.wakeUpFromIQ(0).bits.is0Lat.poke(wIs0Lat.B)
         dut.io.wakeUpFromIQ(0).bits.robIdx.poke(0.U)
         dut.io.wakeUpFromIQ(0).bits.loadDependency.foreach(_.poke(0.U))
         dut.io.wakeUpFromIQ(0).bits.rcDest.poke(0.U)
@@ -357,21 +353,18 @@ class IssueQueueSpec extends AnyFlatSpec with ChiselScalatestTester with Matcher
           if (pdest == 7 && producerDeq < 0) producerDeq = cycle
           if (pdest == 8 && consumerDeq < 0) {
             consumerDeq = cycle
-            // 消费者被 IQ 唤醒，当前应读 bypass2（与广播打一拍绑定）。
-            dut.io.deq(0).bits.common.dataSources(0).expect(DataSource.bypass2.U)
+            // 组合广播后消费者下一拍发射，读到生产者的组合 forward。
+            dut.io.deq(0).bits.common.dataSources(0).expect(DataSource.forward.U)
           }
         }
 
-        lastWakeupValid = dut.io.wakeupToIQ(0).valid.peek().litToBoolean
-        lastPdest       = dut.io.wakeupToIQ(0).bits.pdest.peek().litValue.toInt
-        lastIs0Lat      = dut.io.wakeupToIQ(0).bits.is0Lat.peek().litToBoolean
         dut.clock.step()
         cycle += 1
       }
 
       producerDeq should be >= 0
       consumerDeq should be >= 0
-      (consumerDeq - producerDeq) shouldBe 2
+      (consumerDeq - producerDeq) shouldBe 1
     }
   }
 }

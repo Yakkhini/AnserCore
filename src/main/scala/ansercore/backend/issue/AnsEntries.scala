@@ -33,13 +33,12 @@ class AnsEntries(
       entry.io.wakeUpFromWB    := io.wakeUpFromWB
       entry.io.wakeUpFromIQ    := io.wakeUpFromIQ
       entry.io.data0Cancel     := io.data0Cancel
+      entry.io.data1Cancel     := io.data1Cancel
       entry.io.ldCancel        := io.ldCancel
       entry.io.enqWakeUpWB1    := io.enqWakeUpWB1
       entry.io.enqWakeUpIQ1    := io.enqWakeUpIQ1
-      entry.io.enqWakeUpWB2    := io.enqWakeUpWB2
-      entry.io.enqWakeUpIQ2    := io.enqWakeUpIQ2
+      entry.io.enqLdCancel1    := io.enqLdCancel1
       entry.io.enqData0Cancel1 := io.enqData0Cancel1
-      entry.io.enqData0Cancel2 := io.enqData0Cancel2
       entry.io.data0Resp       := io.data0Resp
       entry.io.data1Resp       := io.data1Resp
       entry.io.deqSel          := false.B
@@ -54,7 +53,7 @@ class AnsEntries(
   broadcastIn()
 
   // ---- 转移：EnqEntry -> ComplexEntry，全转或全不转 ----
-  val enqValidForTrans = VecInit(enqEntries.map(e => e.io.valid && !e.io.issued))
+  val enqValidForTrans = VecInit(enqEntries.map(_.io.transEntry.valid))
   val othersFree       = VecInit(othersEntries.map(e => !e.io.valid))
   val enqCanTrans      = PopCount(enqValidForTrans) <= PopCount(othersFree)
 

@@ -23,12 +23,11 @@ class AnsEntrySpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
       dut.io.wakeUpFromWB,
       dut.io.wakeUpFromIQ,
       dut.io.enqWakeUpWB1,
-      dut.io.enqWakeUpWB2,
       dut.io.enqWakeUpIQ1,
-      dut.io.enqWakeUpIQ2,
       dut.io.data0Cancel,
+      dut.io.data1Cancel,
       dut.io.enqData0Cancel1,
-      dut.io.enqData0Cancel2,
+      dut.io.enqLdCancel1,
       dut.io.ldCancel,
       dut.io.data0Resp,
       dut.io.data1Resp,
@@ -76,73 +75,165 @@ class AnsEntrySpec extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
   behavior of "AnsEntry"
 
-  it should "choose one current IQ producer with matching metadata when wakeups overlap" in {
-    test(new AnsEntry(params, iq, isEnq = true)) { dut =>
-      init(dut)
-      wake(dut.io.wakeUpFromIQ(0), dependency = 1)
-      wake(dut.io.wakeUpFromIQ(1), dependency = 2)
-      writeback(dut.io.wakeUpFromWB.last)
-      wake(dut.io.enqWakeUpIQ1(2), dependency = 8)
-      dut.clock.step()
-      dut.io.canIssue.expect(true.B)
-      dut.io.dataSources(0).expect(DataSource.bypass2.U)
-      dut.io.exuSources(0).expect((iq.wakeupSourceExuIdx.head + 1).U)
-      dut.io.loadDependency(0).expect(1.U)
-
-      Seq(dut.io.wakeUpFromIQ, dut.io.wakeUpFromWB, dut.io.enqWakeUpIQ1).foreach(zero)
-      dut.clock.step()
-      dut.io.dataSources(0).expect(DataSource.registerFile.U)
-      dut.io.loadDependency(0).expect(2.U)
-    }
-  }
-
-  it should "prefer confirmed delayed writeback over speculative delayed IQ metadata" in {
-    test(new AnsEntry(params, iq, isEnq = true)) { dut =>
-      for (delay <- 1 to 2) {
+  for (isEnq <- Seq(true, false)) {
+    it should s"issue on the IQ broadcast cycle and age the saved source (enq=$isEnq)" in {
+      test(new AnsEntry(params, iq, isEnq)) { dut =>
         init(dut)
-        val wb = if (delay == 1) dut.io.enqWakeUpWB1 else dut.io.enqWakeUpWB2
-        writeback(wb.last)
-        wake(dut.io.enqWakeUpIQ1(1), dependency = 8)
+        wake(dut.io.wakeUpFromIQ(0), 1)
+        wake(dut.io.wakeUpFromIQ(1), 4)
         dut.io.canIssue.expect(true.B)
+        dut.io.dataSources(0).expect(DataSource.forward.U)
+        dut.io.exuSources(0).expect((iq.wakeupSourceExuIdx.head + 1).U)
+        dut.io.loadDependency(0).expect(2.U)
+        dut.io.transEntry.bits.status.srcStatus(0).dataSources.expect(DataSource.bypass.U)
+        dut.clock.step()
+        zero(dut.io.wakeUpFromIQ)
+        dut.io.dataSources(0).expect(DataSource.bypass.U)
+        dut.io.loadDependency(0).expect(4.U)
         dut.clock.step()
         dut.io.dataSources(0).expect(DataSource.registerFile.U)
-        dut.io.exuSources(0).expect(0.U)
-        dut.io.loadDependency(0).expect(0.U)
+        dut.io.loadDependency(0).expect(8.U)
       }
     }
   }
 
-  it should "prefer the newer delayed IQ candidate and ignore history outside the enqueue window" in {
+  it should "form D1 current state before current wakeup and age its dependency once per boundary" in {
     test(new AnsEntry(params, iq, isEnq = true)) { dut =>
       init(dut)
-      wake(dut.io.enqWakeUpIQ1(0), dependency = 4)
-      wake(dut.io.enqWakeUpIQ2(1), dependency = 8)
+      wake(dut.io.enqWakeUpIQ1(1), 1)
+      dut.io.canIssue.expect(true.B)
+      dut.io.dataSources(0).expect(DataSource.bypass.U)
+      dut.io.loadDependency(0).expect(4.U)
+      wake(dut.io.wakeUpFromIQ(0), 8)
+      dut.io.dataSources(0).expect(DataSource.forward.U)
+      dut.io.exuSources(0).expect((iq.wakeupSourceExuIdx.head + 1).U)
+      dut.io.loadDependency(0).expect(16.U)
+      dut.clock.step()
+      zero(dut.io.wakeUpFromIQ)
+      dut.io.dataSources(0).expect(DataSource.bypass.U)
       dut.clock.step()
       dut.io.dataSources(0).expect(DataSource.registerFile.U)
-      dut.io.exuSources(0).expect((iq.wakeupSourceExuIdx.head + 1).U)
-      dut.io.loadDependency(0).expect(4.U)
-
       init(dut)
-      dut.clock.step(2)
-      wake(dut.io.enqWakeUpIQ1(0), dependency = 4)
-      writeback(dut.io.enqWakeUpWB2.last)
       dut.clock.step()
+      wake(dut.io.enqWakeUpIQ1(1), 1)
+      writeback(dut.io.enqWakeUpWB1(0))
       dut.io.canIssue.expect(false.B)
     }
   }
 
-  it should "exclude cancelled IQ producers before choosing the winner" in {
+  it should "filter D1 data0 and load cancellation in the matching cycle" in {
     test(new AnsEntry(params, iq, isEnq = true)) { dut =>
+      for (cancel <- 0 until 3) {
+        init(dut)
+        wake(dut.io.enqWakeUpIQ1(0), 1, zeroLatency = true)
+        if (cancel == 0) dut.io.enqData0Cancel1(iq.wakeupSourceExuIdx.head).poke(true.B)
+        if (cancel == 1) dut.io.enqLdCancel1(0).first.poke(true.B)
+        if (cancel == 2) dut.io.ldCancel(0).second.poke(true.B)
+        dut.io.canIssue.expect(false.B)
+        dut.clock.step()
+        zero(dut.io.enqWakeUpIQ1)
+        dut.io.canIssue.expect(false.B)
+      }
+      init(dut)
+      writeback(dut.io.enqWakeUpWB1(0))
+      wake(dut.io.enqWakeUpIQ1(0), 1)
+      dut.io.canIssue.expect(true.B)
+      dut.io.dataSources(0).expect(DataSource.registerFile.U)
+      dut.io.loadDependency(0).expect(0.U)
+    }
+  }
+
+  it should "allow a raw zero latency attempt without saving cancelled ready" in {
+    test(new AnsEntry(params, iq, isEnq = false)) { dut =>
+      init(dut)
+      wake(dut.io.wakeUpFromIQ(0), 0, zeroLatency = true)
+      dut.io.data0Cancel(iq.wakeupSourceExuIdx.head).poke(true.B)
+      dut.io.canIssue.expect(true.B)
+      dut.io.dataSources(0).expect(DataSource.forward.U)
+      dut.io.transEntry.bits.status.srcStatus(0).srcState.expect(SourceState.waiting.U)
+      dut.clock.step()
+      zero(dut.io.wakeUpFromIQ)
+      dut.io.canIssue.expect(false.B)
+    }
+  }
+
+  it should "keep ready through consumer retries and unrelated later producer cancellations" in {
+    test(new AnsEntry(params, iq, isEnq = false)) { dut =>
+      init(dut)
+      wake(dut.io.wakeUpFromIQ(0), 0)
+      dut.io.deqSel.poke(true.B)
+      dut.clock.step()
+      zero(dut.io.wakeUpFromIQ)
+      dut.io.deqSel.poke(false.B)
+      dut.io.data0Resp(0).valid.poke(true.B)
+      dut.io.data0Resp(0).bits.resp.poke(IssueRespType.block.U)
+      dut.clock.step()
+      zero(dut.io.data0Resp)
+      dut.io.data0Cancel(iq.wakeupSourceExuIdx.head).poke(true.B)
+      dut.io.data1Cancel(iq.wakeupSourceExuIdx.head).poke(true.B)
+      dut.io.canIssue.expect(true.B)
+      dut.io.dataSources(0).expect(DataSource.registerFile.U)
+      for (_ <- 0 until 3) {
+        dut.io.deqSel.poke(true.B)
+        dut.clock.step()
+        dut.io.deqSel.poke(false.B)
+        dut.clock.step()
+        dut.io.data1Resp(0).valid.poke(true.B)
+        dut.io.data1Resp(0).bits.resp.poke(IssueRespType.block.U)
+        dut.clock.step()
+        zero(dut.io.data1Resp)
+        dut.io.canIssue.expect(true.B)
+        dut.io.dataSources(0).expect(DataSource.registerFile.U)
+      }
+    }
+  }
+
+  it should "register ordinary WB wakeup and clear dependencies without same cycle selection" in {
+    test(new AnsEntry(params, iq, isEnq = false)) { dut =>
+      init(dut)
+      writeback(dut.io.wakeUpFromWB(0))
+      dut.io.canIssue.expect(false.B)
+      dut.clock.step()
+      zero(dut.io.wakeUpFromWB)
+      dut.io.canIssue.expect(true.B)
+      dut.io.loadDependency(0).expect(0.U)
+    }
+  }
+
+  it should "cancel current IQ dependencies and revoke saved ready on load cancellation" in {
+    test(new AnsEntry(params, iq, isEnq = false)) { dut =>
+      init(dut)
+      wake(dut.io.wakeUpFromIQ(0), 1)
+      dut.io.ldCancel(0).first.poke(true.B)
+      dut.io.cancelBypass.expect(true.B)
+      dut.io.transEntry.bits.status.srcStatus(0).srcState.expect(SourceState.waiting.U)
+      zero(dut.io.ldCancel)
+      dut.clock.step()
+      zero(dut.io.wakeUpFromIQ)
+      dut.io.ldCancel(0).second.poke(true.B)
+      dut.io.cancelBypass.expect(true.B)
+      dut.clock.step()
+      zero(dut.io.ldCancel)
+      dut.io.canIssue.expect(false.B)
+    }
+  }
+
+  it should "select cancelled and valid IQ candidates with coherent producer metadata" in {
+    test(new AnsEntry(params, iq, isEnq = false)) { dut =>
       for (loadCancel <- Seq(false, true)) {
         init(dut)
-        wake(dut.io.wakeUpFromIQ(0), dependency = 1, zeroLatency = true)
-        wake(dut.io.wakeUpFromIQ(1), dependency = 4)
+        wake(dut.io.wakeUpFromIQ(0), 1, zeroLatency = true)
+        wake(dut.io.wakeUpFromIQ(1), 4)
         if (loadCancel) dut.io.ldCancel(0).first.poke(true.B)
         else dut.io.data0Cancel(iq.wakeupSourceExuIdx.head).poke(true.B)
-        dut.clock.step()
-        dut.io.dataSources(0).expect(DataSource.bypass2.U)
+        dut.io.canIssue.expect(true.B)
+        dut.io.cancelBypass.expect(false.B)
         dut.io.exuSources(0).expect((iq.wakeupSourceExuIdx(1) + 1).U)
-        dut.io.loadDependency(0).expect(4.U)
+        dut.io.loadDependency(0).expect(8.U)
+        dut.clock.step(); zero(dut.io.wakeUpFromIQ)
+        dut.io.dataSources(0).expect(DataSource.bypass.U)
+        dut.io.exuSources(0).expect((iq.wakeupSourceExuIdx(1) + 1).U)
+        dut.io.loadDependency(0).expect(16.U)
       }
     }
   }

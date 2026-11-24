@@ -14,6 +14,7 @@ import chisel3._
 import chisel3.util._
 
 import ansercore.backend.Bundles._
+import ansercore.backend.datapath._
 import ansercore.backend.dispatch._
 import ansercore.backend.exu.csr.AnsCsrStub
 import ansercore.backend.issue._
@@ -28,6 +29,9 @@ class AnsBackendDebugIO(override val params: BundleParams = BundleParams()) exte
 
   /** Dispatch -> IQ 的调试镜像；真实 IQ 实现后由 IQ 消费 ready。 */
   val iqEnq = Output(Vec(AnsDispatchParams.IQEnqSum, Valid(new DynInst(params))))
+
+  /** DataPath 只读性能计数器。 */
+  val datapathPerf = Output(new AnsDataPathPerf(params))
 }
 
 /** Backend 对外端口：前端接口（访存接口待 LSU/数据缓存实现后再加）。 */
@@ -57,11 +61,10 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
 
   // ---- internal backend modules ----
   val csr = Module(new AnsCsrStub(params))
-  val rob = Module(new AnsRob(params, writebackPorts = AnsIssueParams.nExu))
+  val rob = Module(new AnsRob(params, writebackPorts = AnsIssueParams.nCompletion))
 
   // ROB boundary placeholders: route the real redirect arbiter / completion buses here later.
   rob.io.redirectIn             := 0.U.asTypeOf(rob.io.redirectIn)
-  rob.io.writeback              := 0.U.asTypeOf(rob.io.writeback)
   rob.io.lsq.mmioBusy           := false.B
   rob.io.csr.intrBitSet         := false.B
   rob.io.csr.trapTarget         := 0.U
@@ -91,8 +94,17 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
   val fpSchd   = Module(AnsScheduler(params, AnsIssueParams.fpScheduler))
   val memSchd  = Module(AnsScheduler(params, AnsIssueParams.memScheduler))
   val dataPath = Module(new AnsDataPath(params))
+  val bypass   = Module(new AnsBypassNetwork(params))
   val exuBlock = Module(new AnsExuBlockStub(params))
-  val wbDp     = Module(new AnsWbDataPathStub(params))
+  val wbDp     = Module(new AnsWbDataPath(params))
+
+  rob.io.writeback := wbDp.io.toRob
+
+  // load/store 本轮只预留接口；真实 LSU 返回数据后续接入。
+  wbDp.io.fromLsu.foreach { r =>
+    r.valid := false.B
+    r.bits  := 0.U.asTypeOf(r.bits)
+  }
 
   val schedulers = Seq(
     intSchd -> AnsIssueParams.intScheduler,
@@ -101,12 +113,16 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
   )
 
   val issueFlush = ctrlBlock.io.redirect
+  // Real LSU cancellation is not enabled yet; all scalar consumers share this future source.
+  val loadCancel = WireDefault(0.U.asTypeOf(Vec(params.loadPipelineWidth, new LoadCancel)))
   for ((schd, _) <- schedulers) {
     schd.io.flush    := issueFlush
-    schd.io.ldCancel := 0.U.asTypeOf(schd.io.ldCancel)
+    schd.io.ldCancel := loadCancel
   }
+  dataPath.io.ldCancel := loadCancel
   dataPath.io.flush := issueFlush
   exuBlock.io.flush := issueFlush
+  wbDp.io.flush     := issueFlush
 
   // ---- Dispatch -> Scheduler ----
   private var dpPort = 0
@@ -135,36 +151,23 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
   require(iqExuPort == AnsIssueParams.nExu, "IQ valid-count exu accounting mismatch")
 
   // ---- IQ 唤醒总线 ----
-  // 所有 Scheduler 的 wakeupOut 先按 exuIdx 合流，再由 `registerWakeupBroadcast` 决定
-  // 是否打一拍：
-  //   true（默认）：切断 "IQ 选择 -> 唤醒队列 -> 全后端合流 -> 所有 IQ 源状态比较"
-  //                这条组合路径，代价是 0-lat 依赖链多一拍；
-  //   false（预留）：香山式组合广播。启用前必须同步修改 AnsEntry 的唤醒命中数据源
-  //                （bypass2 -> bypass1）并补齐 0-lat 取消回滚，否则会读错旁路周期。
-  // 详见 markdown/IssueQueue 设计文档 §5.5。
-  val wakeupRaw = Wire(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
+  // WakeupQueue 已完成唯一的广播寄存；此处按 EXU owner 组合分发。
+  val wakeupOwner = schedulers.flatMap { case (schd, sp) =>
+    sp.exus.map(_.exuIdx -> schd)
+  }.toMap
+  require(wakeupOwner.size == AnsIssueParams.nExu, "each EXU must belong to exactly one scheduler")
+  val wakeupRaw   = Wire(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
   for (e <- 0 until AnsIssueParams.nExu) {
-    val cands = schedulers.map(_._1.io.wakeupOut(e))
-    wakeupRaw(e).valid := VecInit(cands.map(_.valid)).asUInt.orR
-    wakeupRaw(e).bits  := Mux(cands(0).valid, cands(0).bits, Mux(cands(1).valid, cands(1).bits, cands(2).bits))
+    val w = wakeupOwner(e).io.wakeupOut(e)
+    wakeupRaw(e).valid := w.valid
+    wakeupRaw(e).bits  := w.bits
   }
   val wakeupGated = Wire(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
   for (e <- 0 until AnsIssueParams.nExu) {
     wakeupGated(e).valid := wakeupRaw(e).valid && !AnsIssueUtils.needFlush(wakeupRaw(e).bits.robIdx, issueFlush)
     wakeupGated(e).bits  := wakeupRaw(e).bits
   }
-  // wakeupBus 是本轮实现的唤醒广播结果：默认是打一拍版本，换成组合广播只需改这个开关。
-  val wakeupBus = Wire(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
-  if (params.registerWakeupBroadcast) {
-    val wakeupReg = Reg(Vec(AnsIssueParams.nExu, Valid(new AnsIqWakeUp(params))))
-    for (e <- 0 until AnsIssueParams.nExu) {
-      wakeupReg(e) := wakeupGated(e)
-    }
-    wakeupBus := wakeupReg
-  } else {
-    // NOTE: 保持结构预留。直接启用会与 AnsEntry 的 bypass2 映射和数据0取消时序冲突。
-    wakeupBus := wakeupGated
-  }
+  val wakeupBus   = wakeupGated
   for ((schd, _) <- schedulers) {
     schd.io.wakeupIn := wakeupBus
   }
@@ -174,40 +177,42 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
   dispatchWakeup         := 0.U.asTypeOf(dispatchWakeup)
   for ((exuIdx, k) <- AnsIssueParams.intWakeUpExuIdx.zipWithIndex) {
     val w = wakeupBus(exuIdx)
-    dispatchWakeup.wakeUpInt(k).valid       := w.valid
-    dispatchWakeup.wakeUpInt(k).bits.rfWen  := w.bits.intWen
-    dispatchWakeup.wakeUpInt(k).bits.fpWen  := w.bits.fpWen
-    dispatchWakeup.wakeUpInt(k).bits.pdest  := w.bits.pdest
-    dispatchWakeup.wakeUpInt(k).bits.rcDest := w.bits.rcDest
-    dispatchWakeup.wakeUpInt(k).bits.is0Lat := w.bits.is0Lat
+    dispatchWakeup.wakeUpInt(k).valid               := w.valid
+    dispatchWakeup.wakeUpInt(k).bits.rfWen          := w.bits.intWen
+    dispatchWakeup.wakeUpInt(k).bits.fpWen          := w.bits.fpWen
+    dispatchWakeup.wakeUpInt(k).bits.pdest          := w.bits.pdest
+    dispatchWakeup.wakeUpInt(k).bits.rcDest         := w.bits.rcDest
+    dispatchWakeup.wakeUpInt(k).bits.is0Lat         := w.bits.is0Lat
+    dispatchWakeup.wakeUpInt(k).bits.loadDependency := w.bits.loadDependency
   }
   for ((exuIdx, k) <- AnsIssueParams.fpWakeUpExuIdx.zipWithIndex) {
     val w = wakeupBus(exuIdx)
-    dispatchWakeup.wakeUpFp(k).valid       := w.valid
-    dispatchWakeup.wakeUpFp(k).bits.rfWen  := w.bits.intWen
-    dispatchWakeup.wakeUpFp(k).bits.fpWen  := w.bits.fpWen
-    dispatchWakeup.wakeUpFp(k).bits.pdest  := w.bits.pdest
-    dispatchWakeup.wakeUpFp(k).bits.rcDest := w.bits.rcDest
-    dispatchWakeup.wakeUpFp(k).bits.is0Lat := w.bits.is0Lat
+    dispatchWakeup.wakeUpFp(k).valid               := w.valid
+    dispatchWakeup.wakeUpFp(k).bits.rfWen          := w.bits.intWen
+    dispatchWakeup.wakeUpFp(k).bits.fpWen          := w.bits.fpWen
+    dispatchWakeup.wakeUpFp(k).bits.pdest          := w.bits.pdest
+    dispatchWakeup.wakeUpFp(k).bits.rcDest         := w.bits.rcDest
+    dispatchWakeup.wakeUpFp(k).bits.is0Lat         := w.bits.is0Lat
+    dispatchWakeup.wakeUpFp(k).bits.loadDependency := w.bits.loadDependency
   }
   ctrlBlock.io.wakeUpAll := dispatchWakeup
 
   for ((schd, _) <- schedulers) {
-    schd.io.intWriteBack := wbDp.io.intWriteBack
-    schd.io.fpWriteBack  := wbDp.io.fpWriteBack
+    schd.io.intWriteBack := wbDp.io.toIntRf
+    schd.io.fpWriteBack  := wbDp.io.toFpRf
   }
 
   for (k <- 0 until AnsDispatchParams.nIntWb) {
-    ctrlBlock.io.wbPregsInt(k).valid := wbDp.io.intWriteBack(k).wen
-    ctrlBlock.io.wbPregsInt(k).bits  := wbDp.io.intWriteBack(k).addr
+    ctrlBlock.io.wbPregsInt(k).valid := wbDp.io.toIntRf(k).wen
+    ctrlBlock.io.wbPregsInt(k).bits  := wbDp.io.toIntRf(k).addr
   }
   for (k <- 0 until AnsDispatchParams.nFpWb) {
-    ctrlBlock.io.wbPregsFp(k).valid := wbDp.io.fpWriteBack(k).wen
-    ctrlBlock.io.wbPregsFp(k).bits  := wbDp.io.fpWriteBack(k).addr
+    ctrlBlock.io.wbPregsFp(k).valid := wbDp.io.toFpRf(k).wen
+    ctrlBlock.io.wbPregsFp(k).bits  := wbDp.io.toFpRf(k).addr
   }
 
   ctrlBlock.io.data0CancelToDispatch := dataPath.io.toIq.data0CancelToDispatch
-  ctrlBlock.io.ldCancel              := 0.U.asTypeOf(ctrlBlock.io.ldCancel)
+  ctrlBlock.io.ldCancel              := loadCancel
 
   // ---- Scheduler <-> DataPath ----
   for ((schd, sp) <- schedulers) {
@@ -222,16 +227,38 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
     }
   }
 
-  // ---- DataPath <-> EXU / WbDataPath 占位 ----
+  // ---- DataPath -> BypassNetwork -> bypassNetwork2Exu -> EXU ----
+  val exuPipe =
+    Seq.tabulate(AnsIssueParams.nExu)(e => Module(new AnsExuInputPipe(params, AnsIssueParams.exuByIndex(e))))
   for (e <- 0 until AnsIssueParams.nExu) {
-    exuBlock.io.in(e).valid    := dataPath.io.toExu(e).valid
-    exuBlock.io.in(e).bits     := dataPath.io.toExu(e).bits
-    dataPath.io.toExu(e).ready := exuBlock.io.in(e).ready
+    bypass.io.fromDataPath(e).valid      := dataPath.io.toBypassNetwork(e).valid
+    bypass.io.fromDataPath(e).bits       := dataPath.io.toBypassNetwork(e).bits
+    dataPath.io.toBypassNetwork(e).ready := bypass.io.fromDataPath(e).ready
+
+    exuPipe(e).io.flush      := issueFlush
+    exuPipe(e).io.in.valid   := bypass.io.toExu(e).valid
+    exuPipe(e).io.in.bits    := bypass.io.toExu(e).bits
+    bypass.io.toExu(e).ready := exuPipe(e).io.in.ready
+
+    exuBlock.io.in(e).valid := exuPipe(e).io.out.valid
+    exuBlock.io.in(e).bits  := exuPipe(e).io.out.bits
+    exuPipe(e).io.out.ready := exuBlock.io.in(e).ready
+    exuBlock.io.outReady(e) := wbDp.io.fromExuReady(e)
   }
-  dataPath.io.exuOutput    := exuBlock.io.out
-  dataPath.io.intWriteBack := wbDp.io.intWriteBack
-  dataPath.io.fpWriteBack  := wbDp.io.fpWriteBack
+  for ((schd, _) <- schedulers) {
+    schd.io.exuBusy := VecInit(
+      (0 until AnsIssueParams.nExu).map(e => exuBlock.io.uncertainBusy(e) | exuPipe(e).io.uncertainBusy)
+    )
+  }
+  exuBlock.io.uncertainIn <> exuPipe(AnsIssueParams.uncertainOwner.exuIdx).io.uncertainOut
+  wbDp.io.fromUncertain <> exuBlock.io.uncertainOut
+  bypass.io.rcData      := dataPath.io.rcData
+  bypass.io.fromExu     := exuBlock.io.out
+
+  // ---- EXU -> WbDataPath ----
   wbDp.io.fromExu          := exuBlock.io.out
+  dataPath.io.intWriteBack := wbDp.io.toIntRf
+  dataPath.io.fpWriteBack  := wbDp.io.toFpRf
 
   // PC 镜像：前端进入 Decode 的第一个槽位按 ftqPtr 更新（RVC 下需改为按实际槽位）。
   val pcWrite = Wire(new AnsPcMemWrite(params))
@@ -256,6 +283,7 @@ class AnsBackend(val params: BundleParams = BundleParams()) extends Module {
   io.debug.fusionInfo    := ctrlBlock.io.debug.fusionInfo
   io.debug.dispatch      := ctrlBlock.io.debug.dispatch
   io.debug.trapInstInfo  := ctrlBlock.io.trapInstInfo
+  io.debug.datapathPerf  := dataPath.io.perf
 
   for (port <- 0 until AnsDispatchParams.IQEnqSum) {
     io.debug.iqEnq(port).valid := ctrlBlock.io.toIssueQueues(port).valid

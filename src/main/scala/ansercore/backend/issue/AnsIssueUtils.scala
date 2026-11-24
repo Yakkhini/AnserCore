@@ -21,6 +21,10 @@ object AnsIssueUtils {
     redirect.valid && (younger || itself)
   }
 
+  /** Advance exactly once at a cycle boundary; issue metadata is already aged for data0. */
+  def shiftLoadDependency(dep: Vec[UInt]): Vec[UInt] =
+    VecInit(dep.map(x => (x << 1)(x.getWidth - 1, 0)))
+
   def mergeLoadDependency(deps: Seq[Vec[UInt]]): Vec[UInt] = {
     val width = deps.head.length
     VecInit((0 until width).map { i =>

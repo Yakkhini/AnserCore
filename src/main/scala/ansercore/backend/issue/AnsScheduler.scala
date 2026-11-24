@@ -73,6 +73,7 @@ abstract class AnsSchedulerBase(
     iq.io.flush        := io.flush
     iq.io.ldCancel     := io.ldCancel
     iq.io.data0Cancel  := io.fromDataPath.data0Cancel
+    iq.io.data1Cancel  := io.fromDataPath.data1Cancel
     iq.io.wakeUpFromWB := wbWakeups
     iqParams.wakeupSourceExuIdx.zipWithIndex.foreach { case (exuIdx, k) =>
       iq.io.wakeUpFromIQ(k) := io.wakeupIn(exuIdx)
@@ -83,6 +84,7 @@ abstract class AnsSchedulerBase(
       iq.io.data0Resp(d)       := io.fromDataPath.data0Resp(exu.exuIdx)
       iq.io.data1Resp(d)       := io.fromDataPath.data1Resp(exu.exuIdx)
       iq.io.wbBusyTableRead(d) := io.wbBusyTableRead(exu.exuIdx)
+      iq.io.exuBusy(d)         := io.exuBusy(exu.exuIdx)
 
       io.wbBusyTableWrite(exu.exuIdx) := iq.io.wbBusyTableWrite(d)
 
@@ -159,13 +161,17 @@ final class AnsSchedulerMem(
       staUop.srcState(srcSlot) := SourceState.ready.U
       val stdUop = makeCopiedUop(in.bits, srcSlot, dstSlot, dstNeutral)
 
-      srcIQ.io.enq(e).valid := in.valid
+      // Atomic fork: neither child may consume a request unless its peer can too.
+      // IQ enqueue ready depends on queue state, not on this valid.
+      srcIQ.io.enq(e).valid := in.valid && dstIQ.io.enq(e).ready
       srcIQ.io.enq(e).bits  := staUop
-      dstIQ.io.enq(e).valid := in.valid
+      dstIQ.io.enq(e).valid := in.valid && srcIQ.io.enq(e).ready
       dstIQ.io.enq(e).bits  := stdUop
 
       // 两个队列都有空间时，才向 Dispatch 返回 ready。
       in.ready := srcIQ.io.enq(e).ready && dstIQ.io.enq(e).ready
+      assert(srcIQ.io.enq(e).fire === in.fire, "STA enqueue must match the store input handshake")
+      assert(dstIQ.io.enq(e).fire === in.fire, "STD enqueue must match the store input handshake")
     }
   }
 

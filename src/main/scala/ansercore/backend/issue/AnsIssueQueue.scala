@@ -10,7 +10,7 @@
  * 简化：
  *   - 不区分 SimpleEntry；
  *   - 非确定延迟 FU（div/csr/fence/fdiv/ldu/stu/mou）不产生推测唤醒，只由 WB 唤醒；
- *   - IQ 唤醒广播前在 Backend 统一打一拍，避免 IQ 内部组合环。
+ *   - IQ 唤醒在 WakeupQueue 合流后统一打一拍，避免 IQ 内部组合环。
  */
 package ansercore.backend.issue
 
@@ -55,7 +55,11 @@ class AnsIssueQueue(
       val isReg   = SrcType.isRegister(srcType)
       entry.status.srcStatus(j).psrc              := uop.psrc(j)
       entry.status.srcStatus(j).srcType           := srcType
-      entry.status.srcStatus(j).srcState          := Mux(isReg, uop.srcState(j), SourceState.ready.U(SourceState.width.W))
+      entry.status.srcStatus(j).srcState          := Mux(
+        !isReg || (SrcType.isInteger(srcType) && uop.psrc(j) === 0.U),
+        SourceState.ready.U,
+        Mux(LoadShouldCancel(uop.srcLoadDependency(j), io.ldCancel), SourceState.waiting.U, uop.srcState(j)),
+      )
       entry.status.srcStatus(j).dataSources       := MuxCase(
         DataSource.registerFile.U(DataSource.width.W),
         Seq(
@@ -81,26 +85,22 @@ class AnsIssueQueue(
   }
 
   // ------------------------------------------------------------------
-  // 唤醒输入：延迟 1/2 拍副本用于 EnqEntry 补查
+  // 唤醒输入：延迟一拍副本用于 EnqEntry 补查
   // ------------------------------------------------------------------
-  val wakeUpWBD1    = RegNext(io.wakeUpFromWB)
-  val wakeUpIQD1    = RegNext(io.wakeUpFromIQ)
-  val wakeUpWBD2    = RegNext(wakeUpWBD1)
-  val wakeUpIQD2    = RegNext(wakeUpIQD1)
-  val data0CancelD1 = RegNext(io.data0Cancel)
-  val data0CancelD2 = RegNext(data0CancelD1)
+  val wakeUpWBD1    = RegNext(io.wakeUpFromWB, 0.U.asTypeOf(io.wakeUpFromWB))
+  val wakeUpIQD1    = RegNext(io.wakeUpFromIQ, 0.U.asTypeOf(io.wakeUpFromIQ))
+  val data0CancelD1 = RegNext(io.data0Cancel, 0.U.asTypeOf(io.data0Cancel))
 
   entries.io.flush           := io.flush
   entries.io.wakeUpFromWB    := io.wakeUpFromWB
   entries.io.wakeUpFromIQ    := io.wakeUpFromIQ
   entries.io.data0Cancel     := io.data0Cancel
+  entries.io.data1Cancel     := io.data1Cancel
   entries.io.ldCancel        := io.ldCancel
   entries.io.enqWakeUpWB1    := wakeUpWBD1
   entries.io.enqWakeUpIQ1    := wakeUpIQD1
-  entries.io.enqWakeUpWB2    := wakeUpWBD2
-  entries.io.enqWakeUpIQ2    := wakeUpIQD2
+  entries.io.enqLdCancel1    := RegNext(io.ldCancel, 0.U.asTypeOf(io.ldCancel))
   entries.io.enqData0Cancel1 := data0CancelD1
-  entries.io.enqData0Cancel2 := data0CancelD2
   entries.io.data0Resp       := io.data0Resp
   entries.io.data1Resp       := io.data1Resp
   for (i <- 0 until numEnq) {
@@ -210,9 +210,12 @@ class AnsIssueQueue(
     io.wbBusyTableWrite(d).fpDeqRespSet   := fpSet
 
     // ---- 合并忙表 + 端口 fuType 过滤 ----
-    val acceptVec = VecInit((0 until numEntries).map(e => iq.portAccepts(d, fuTypeVec(e))))
+    val acceptVec   = VecInit((0 until numEntries).map(e => iq.portAccepts(d, fuTypeVec(e))))
+    // 不确定槽 busy 只屏蔽同 FU 的条目；DIV 忙不能挡住同出口的 MUL。
+    val exuBusyMask = VecInit(fuTypeVec.map(t => (t & io.exuBusy(d)).orR)).asUInt
     deqCanIssueVec(d) := canIssueVec.asUInt & (~fuBusyMaskVec(d)).asUInt &
-      (~intWbMaskVec(d)).asUInt & (~fpWbMaskVec(d)).asUInt & acceptVec.asUInt
+      (~intWbMaskVec(d)).asUInt & (~fpWbMaskVec(d)).asUInt &
+      (~exuBusyMask).asUInt & acceptVec.asUInt
   }
 
   // ---- 年龄选择 ----
@@ -225,7 +228,7 @@ class AnsIssueQueue(
   // 出队口之间的差异全部由各自的 canIssue 向量表达（其中已包含 portAccepts 的 FU 过滤）。
   // 共享前提是两个口的候选互斥——由 AnsIssueParams 的 FU 集合互斥 require 保证。
   // 若将来支持 deqFuSame，第二个口需要像香山 subDeqRequest 一样排除第一个口的选中项。
-  val enqOldestAll = AnsAgeDetector(
+  val enqOldestAll    = AnsAgeDetector(
     numEnq,
     enqAgeEnq,
     VecInit((0 until numDeq).map(d => deqCanIssueVec(d)(numEnq - 1, 0))),
@@ -320,7 +323,7 @@ class AnsIssueQueue(
       deqDlyBits(d) := deqBeforeDly(d).bits
     }
 
-    io.deq(d).valid := deqDlyValid(d)
+    io.deq(d).valid := deqDlyValid(d) && !AnsIssueUtils.needFlush(deqDlyBits(d).common.robIdx, io.flush)
     io.deq(d).bits  := deqDlyBits(d)
     when(deqDlyValid(d) && !io.deq(d).ready) {
       assert(false.B, "IQ dequeue is expected to be accepted by DataPath every cycle")
@@ -340,12 +343,15 @@ class AnsIssueQueue(
 
       val wq    = Module(new AnsMultiWakeupQueue(exu.wakeupFuLatencySet, params))
       val flush = Wire(new AnsWakeupFlush(params))
-      flush.redirect                    := io.flush
-      flush.ldCancel                    := io.ldCancel
-      flush.data0Fail                   := io.data0Resp(d).valid && IssueRespType.isBlocked(io.data0Resp(d).bits.resp)
-      flush.data1Fail                   := io.data1Resp(d).valid && IssueRespType.isBlocked(io.data1Resp(d).bits.resp)
+      flush.redirect  := io.flush
+      flush.ldCancel  := io.ldCancel
+      flush.data0Fail := io.data0Resp(d).valid && IssueRespType.isBlocked(io.data0Resp(d).bits.resp)
+      flush.data1Fail := io.data1Resp(d).valid && IssueRespType.isBlocked(io.data1Resp(d).bits.resp)
+      // FEX 的 F2I 整数结果只走实际 WB，不产生整数 IQ 推测唤醒；
+      // FEX 写 FP PRF 的结果（fpWen）仍进入唤醒队列，继续唤醒 FP IQ。
+      val iqWakeupEligible = !(exu.isFpExeUnit.B && deqBeforeDly(d).bits.common.intWen)
       wq.io.flush                       := flush
-      wq.io.enq.valid                   := deqBeforeDly(d).valid && hasLat
+      wq.io.enq.valid                   := deqBeforeDly(d).valid && hasLat && iqWakeupEligible
       wq.io.enq.bits.lat                := lat
       wq.io.enq.bits.uop.robIdx         := deqBeforeDly(d).bits.common.robIdx
       wq.io.enq.bits.uop.intWen         := deqBeforeDly(d).bits.common.intWen
