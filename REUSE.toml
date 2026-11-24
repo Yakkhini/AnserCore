@@ -9,14 +9,6 @@ path = [
 SPDX-FileCopyrightText = "2026 ECOS Team <ecos-all@ict.ac.cn>"
 SPDX-License-Identifier = "MulanPSL-2.0"
 
-[[annotations]]
-path = [
-    "rtl-sim/platform/**",
-    "rtl-sim/session/**",
-]
-SPDX-FileCopyrightText = "2026 ECOS Team <ecos-all@ict.ac.cn>"
-SPDX-License-Identifier = "MulanPSL-2.0"
-
 # Markdown and reStructuredText documentation uses CC BY 4.0.
 [[annotations]]
 path = ["**/*.md", "**/*.rst", "docs/_static/dummy_file"]

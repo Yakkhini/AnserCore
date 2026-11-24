@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 ECOS Team <ecos-all@ict.ac.cn>
+ *
+ * SPDX-License-Identifier: MulanPSL-2.0
+ */
+
 #include "session/session.h"
 
 Session::Session(int argc, char **argv)
