@@ -10,9 +10,6 @@ BUILD_DIR := "$PRJ_ROOT/out"
 INC_DIR := "$PRJ_ROOT/rtl-sim/include"
 CONFIG_DIR := "$PRJ_ROOT/rtl-sim/config"
 NPC_NAME := "AnserCore"
-# XiangShan's co-simulation fork. `just dramsim3` clones and builds it.
-DRAMSIM3_HOME := env_var_or_default("DRAMSIM3_HOME", justfile_directory() + "/third_party/DRAMsim3")
-DRAMSIM3_LIB := DRAMSIM3_HOME + "/build/libdramsim3.a"
 
 # GCC is the default. The Clang set is:
 # SIM_COMPILER := "clang"
@@ -26,6 +23,7 @@ SIM_AR := "ar"
 SIM_ARGS := ""
 # simple or dramsim3. dramsim3 defines EMU_DRAMSIM3.
 DRAM_BACKEND := env_var_or_default("DRAM_BACKEND", "simple")
+DRAMSIM3_HOME := env_var_or_default("DRAMSIM3_HOME", "")
 
 # Initialize a West workspace in this checkout and sync only the requested project.
 _west-update project:
@@ -41,22 +39,6 @@ _west-update project:
     fi
     west update --narrow --fetch-opt=--depth=1 {{ quote(project) }}
 
-# Build the West-managed timing model or an existing DRAMSIM3_HOME checkout.
-dramsim3:
-    #!/usr/bin/env zsh
-    set -euo pipefail
-    dram_dir={{ quote(DRAMSIM3_HOME) }}
-    managed="$PRJ_ROOT/third_party/DRAMsim3"
-    if [[ "${dram_dir:A}" == "${managed:A}" || ! -f "$dram_dir/src/cosimulation.h" ]]; then
-        just --justfile "$PRJ_ROOT/Justfile" _west-update dramsim3
-        if [[ "${dram_dir:A}" != "${managed:A}" ]]; then
-            git clone --no-hardlinks "$managed" "$dram_dir"
-            git -C "$dram_dir" remote set-url origin "$(west list dramsim3 -f '{url}')"
-        fi
-    fi
-    cmake -S "$dram_dir" -B "$dram_dir/build" -DCOSIM=ON -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$dram_dir/build" --target dramsim3 -j "$NIX_BUILD_CORES"
-
 sv:
     #!/usr/bin/env zsh
     set -e
@@ -69,7 +51,19 @@ _compile target: sv
     backend={{ quote(DRAM_BACKEND) }}
     case "$backend" in
         simple) ;;
-        dramsim3) just --justfile "$PRJ_ROOT/Justfile" DRAMSIM3_HOME={{ quote(DRAMSIM3_HOME) }} dramsim3 ;;
+        dramsim3)
+            dram_dir={{ quote(DRAMSIM3_HOME) }}
+            if [[ -z "$dram_dir" ]]; then
+                just --justfile "$PRJ_ROOT/Justfile" _west-update dramsim3
+                dram_dir=$(west list dramsim3 -f '{abspath}')
+            elif [[ ! -f "$dram_dir/src/cosimulation.h" ]]; then
+                echo "DRAMSIM3_HOME must point to an existing co-simulation checkout: $dram_dir" >&2
+                exit 1
+            fi
+            dram_dir=${dram_dir:A}
+            cmake -S "$dram_dir" -B "$dram_dir/build" -DCOSIM=ON -DCMAKE_BUILD_TYPE=Release
+            cmake --build "$dram_dir/build" --target dramsim3 -j "$NIX_BUILD_CORES"
+            ;;
         *) echo "unknown DRAM_BACKEND: $backend (expected simple or dramsim3)" >&2; exit 1 ;;
     esac
     obj_dir={{ BUILD_DIR }}/verilator/{{ target }}/$backend
@@ -130,9 +124,9 @@ _compile target: sv
         -pthread
     )
     if [[ "$backend" == "dramsim3" ]]; then
-        include_dirs+=({{ quote(DRAMSIM3_HOME) }}/src)
+        include_dirs+=("$dram_dir/src")
         cxx_flags+=(-DEMU_DRAMSIM3)
-        ld_flags+=({{ quote(DRAMSIM3_LIB) }})
+        ld_flags+=("$dram_dir/build/libdramsim3.a")
     fi
     for dir in $include_dirs; do
         cxx_flags+=(-I$dir)
