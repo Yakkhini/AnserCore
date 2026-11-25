@@ -3,6 +3,7 @@ version = 1
 # Project configuration and automation files use the Mulan PSL v2 license.
 [[annotations]]
 path = [
+    "deps/west.yml",
     ".github/**/*.yaml",
     ".github/**/*.yml",
 ]

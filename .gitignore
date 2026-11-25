@@ -16,3 +16,6 @@ docs/html
 .mill
 
 compile_commands.json
+
+.west/
+third_party/

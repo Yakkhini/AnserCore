@@ -59,7 +59,7 @@
           packages = [
             pkgs.reuse
 
-            (pkgs.python3.withPackages (ps: with ps; [sphinx myst-parser furo]))
+            (pkgs.python3.withPackages (ps: with ps; [sphinx myst-parser furo west]))
 
             # Digital Design Toolchain
             ##
